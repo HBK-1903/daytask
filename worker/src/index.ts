@@ -18,7 +18,10 @@ interface TaskInput {
   category?: string
   dueAt: number
   durationMinutes?: number
+  status?: 'pending' | 'completed' | 'dismissed'
 }
+interface SyncVaultInput { salt: string; iv: string; ciphertext: string }
+interface ReminderSettingsInput { quietStart: string; quietEnd: string; wording: 'brief' | 'task'; privacyMode: boolean }
 
 const encoder = new TextEncoder()
 const jsonHeaders = { 'content-type': 'application/json; charset=utf-8' }
@@ -102,12 +105,29 @@ function isValidSubscription(value: unknown): value is PushSubInput {
     && typeof subscription.keys?.auth === 'string'
 }
 
+function isSyncVaultInput(value: unknown): value is SyncVaultInput {
+  if (!value || typeof value !== 'object') return false
+  const vault = value as Partial<SyncVaultInput>
+  return typeof vault.salt === 'string' && /^[A-Za-z0-9_-]{20,32}$/.test(vault.salt)
+    && typeof vault.iv === 'string' && /^[A-Za-z0-9_-]{16,24}$/.test(vault.iv)
+    && typeof vault.ciphertext === 'string' && /^[A-Za-z0-9_-]{16,1900000}$/.test(vault.ciphertext)
+}
+
+function isReminderSettingsInput(value: unknown): value is ReminderSettingsInput {
+  if (!value || typeof value !== 'object') return false
+  const settings = value as Partial<ReminderSettingsInput>
+  return typeof settings.quietStart === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(settings.quietStart)
+    && typeof settings.quietEnd === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(settings.quietEnd)
+    && (settings.wording === 'brief' || settings.wording === 'task') && typeof settings.privacyMode === 'boolean'
+}
+
 function isTaskInput(value: unknown): value is TaskInput {
   if (!value || typeof value !== 'object') return false
   const task = value as Partial<TaskInput>
   return typeof task.id === 'string' && task.id.length > 0 && task.id.length <= 128
     && typeof task.title === 'string' && task.title.trim().length > 0 && task.title.length <= 240
     && typeof task.dueAt === 'number' && Number.isFinite(task.dueAt)
+    && (task.status === undefined || task.status === 'pending' || task.status === 'completed' || task.status === 'dismissed')
 }
 
 async function requireSession(request: Request, env: Env): Promise<Response | null> {
@@ -146,6 +166,36 @@ async function route(request: Request, env: Env): Promise<Response> {
   const authError = await requireSession(request, env)
   if (authError) return authError
 
+  if (path === '/api/sync' && request.method === 'GET') {
+    const vault = await env.hbkd1.prepare('SELECT salt, iv, ciphertext, updated_at AS updatedAt FROM sync_vault WHERE owner = ?').bind('owner').first<{ salt: string; iv: string; ciphertext: string; updatedAt: number }>()
+    return response(request, env, { vault })
+  }
+
+  if (path === '/api/sync' && request.method === 'PUT') {
+    const payload: unknown = await request.json().catch(() => null)
+    if (!isSyncVaultInput(payload)) return response(request, env, { error: 'Şifreli yedek biçimi geçersiz.' }, 400)
+    await env.hbkd1.prepare(`INSERT INTO sync_vault (owner, salt, iv, ciphertext, updated_at) VALUES ('owner', ?, ?, ?, ?)
+      ON CONFLICT(owner) DO UPDATE SET salt = excluded.salt, iv = excluded.iv, ciphertext = excluded.ciphertext, updated_at = excluded.updated_at`)
+      .bind(payload.salt, payload.iv, payload.ciphertext, Date.now()).run()
+    return response(request, env, { ok: true, updatedAt: Date.now() })
+  }
+
+  if (path === '/api/reminders/settings' && request.method === 'GET') {
+    const settings = await env.hbkd1.prepare('SELECT quiet_start AS quietStart, quiet_end AS quietEnd, wording, privacy_mode AS privacyMode FROM reminder_settings WHERE owner = ?').bind('owner').first<{ quietStart: string; quietEnd: string; wording: 'brief' | 'task'; privacyMode: number }>()
+    return response(request, env, { settings: settings ? { ...settings, privacyMode: Boolean(settings.privacyMode) } : { quietStart: '22:00', quietEnd: '08:00', wording: 'brief', privacyMode: true } })
+  }
+
+  if (path === '/api/reminders/settings' && request.method === 'PUT') {
+    const payload: unknown = await request.json().catch(() => null)
+    if (!isReminderSettingsInput(payload)) return response(request, env, { error: 'Hatırlatma tercihleri geçersiz.' }, 400)
+    await env.hbkd1.prepare(`INSERT INTO reminder_settings (owner, quiet_start, quiet_end, wording, privacy_mode, updated_at)
+      VALUES ('owner', ?, ?, ?, ?, ?) ON CONFLICT(owner) DO UPDATE SET quiet_start = excluded.quiet_start, quiet_end = excluded.quiet_end,
+      wording = excluded.wording, privacy_mode = excluded.privacy_mode, updated_at = excluded.updated_at`)
+      .bind(payload.quietStart, payload.quietEnd, payload.wording, payload.privacyMode ? 1 : 0, Date.now()).run()
+    if (payload.privacyMode) await env.hbkd1.prepare("UPDATE tasks SET title = 'Görev zamanı.', category = 'Kişisel'").run()
+    return response(request, env, { ok: true })
+  }
+
   if (path === '/api/push/subscribe' && request.method === 'POST') {
     const payload: unknown = await request.json().catch(() => null)
     if (!isValidSubscription(payload)) return response(request, env, { error: 'Push aboneliği geçersiz.' }, 400)
@@ -171,15 +221,26 @@ async function route(request: Request, env: Env): Promise<Response> {
     const payload: unknown = await request.json().catch(() => null)
     if (!isTaskInput(payload)) return response(request, env, { error: 'Görev bilgileri geçersiz.' }, 400)
     const now = Date.now()
+    const status = payload.status ?? 'pending'
+    const nextReminderAt = status === 'pending' ? payload.dueAt : 0
+    const privacy = await env.hbkd1.prepare('SELECT privacy_mode AS privacyMode FROM reminder_settings WHERE owner = ?').bind('owner').first<{ privacyMode: number }>()
+    const storedTitle = privacy?.privacyMode !== 0 ? 'Görev zamanı.' : payload.title.trim()
+    const storedCategory = privacy?.privacyMode !== 0 ? 'Kişisel' : payload.category ?? 'Kişisel'
     await env.hbkd1.prepare(`INSERT INTO tasks (id, title, category, due_at, duration_minutes, status, reminder_interval_minutes, next_reminder_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, 'pending', 5, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, 5, ?, ?)
       ON CONFLICT(id) DO UPDATE SET title = excluded.title, category = excluded.category, due_at = excluded.due_at,
-        duration_minutes = excluded.duration_minutes, status = 'pending', next_reminder_at = excluded.next_reminder_at, updated_at = excluded.updated_at`)
-      .bind(payload.id, payload.title.trim(), payload.category ?? 'Kişisel', payload.dueAt, payload.durationMinutes ?? 30, payload.dueAt, now).run()
+        duration_minutes = excluded.duration_minutes, status = excluded.status, next_reminder_at = excluded.next_reminder_at, updated_at = excluded.updated_at`)
+      .bind(payload.id, storedTitle, storedCategory, payload.dueAt, payload.durationMinutes ?? 30, status, nextReminderAt, now).run()
     return response(request, env, { ok: true, id: payload.id })
   }
 
   const taskMatch = path.match(/^\/api\/tasks\/([^/]+)$/)
+  if (taskMatch && request.method === 'DELETE') {
+    const id = decodeURIComponent(taskMatch[1])
+    await env.hbkd1.prepare('DELETE FROM tasks WHERE id = ?').bind(id).run()
+    return response(request, env, { ok: true })
+  }
+
   if (taskMatch && request.method === 'PATCH') {
     const id = decodeURIComponent(taskMatch[1])
     const payload = await request.json().catch(() => null) as { status?: unknown; dueAt?: unknown } | null
@@ -200,7 +261,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   return response(request, env, { error: 'Bulunamadı.' }, 404)
 }
 
-async function sendReminder(env: Env, task: { id: string; title: string; category: string }, subscription: { endpoint: string; p256dh: string; auth: string }): Promise<number> {
+async function sendReminder(env: Env, task: { id: string; title: string; category: string }, subscription: { endpoint: string; p256dh: string; auth: string }, settings: { wording: 'brief' | 'task'; privacyMode: boolean }): Promise<number> {
   if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY || !env.VAPID_SUBJECT) throw new Error('VAPID settings are missing')
   const pushSubscription: WebPushSubscription = {
     endpoint: subscription.endpoint,
@@ -209,15 +270,27 @@ async function sendReminder(env: Env, task: { id: string; title: string; categor
   }
   const vapid: VapidKeys = { subject: env.VAPID_SUBJECT, publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY }
   const payload = await buildPushPayload({
-    data: JSON.stringify({ title: 'Violet Focus · şimdi zamanı', body: task.title, category: task.category, taskId: task.id, url: '/' }),
+    data: JSON.stringify({ title: 'Violet Focus', body: settings.privacyMode || settings.wording === 'brief' ? 'Görev zamanı.' : task.title, taskId: task.id, url: `/?reminderTask=${encodeURIComponent(task.id)}` }),
     options: { ttl: 300 },
   }, pushSubscription, vapid)
   const pushResponse = await fetch(pushSubscription.endpoint, payload)
   return pushResponse.status
 }
 
+function isInQuietHours(now: Date, start: string, end: string): boolean {
+  if (start === end) return false
+  const local = new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Istanbul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(now)
+  const current = Number(local.slice(0, 2)) * 60 + Number(local.slice(3, 5))
+  const from = Number(start.slice(0, 2)) * 60 + Number(start.slice(3, 5))
+  const to = Number(end.slice(0, 2)) * 60 + Number(end.slice(3, 5))
+  return from < to ? current >= from && current < to : current >= from || current < to
+}
+
 async function processDueReminders(env: Env): Promise<void> {
   const now = Date.now()
+  const configured = await env.hbkd1.prepare('SELECT quiet_start AS quietStart, quiet_end AS quietEnd, wording, privacy_mode AS privacyMode FROM reminder_settings WHERE owner = ?').bind('owner').first<{ quietStart: string; quietEnd: string; wording: 'brief' | 'task'; privacyMode: number }>()
+  const settings = configured ? { ...configured, privacyMode: Boolean(configured.privacyMode) } : { quietStart: '22:00', quietEnd: '08:00', wording: 'brief' as const, privacyMode: true }
+  if (isInQuietHours(new Date(now), settings.quietStart, settings.quietEnd)) return
   const dueTasks = await env.hbkd1.prepare(`SELECT id, title, category, reminder_interval_minutes AS intervalMinutes
     FROM tasks WHERE status = 'pending' AND next_reminder_at <= ? ORDER BY next_reminder_at LIMIT 50`).bind(now).all<{
       id: string; title: string; category: string; intervalMinutes: number
@@ -238,7 +311,7 @@ async function processDueReminders(env: Env): Promise<void> {
 
     for (const subscription of subscriptions.results) {
       try {
-        const status = await sendReminder(env, task, subscription)
+        const status = await sendReminder(env, task, subscription, settings)
         if (status === 404 || status === 410) {
           await env.hbkd1.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').bind(subscription.endpoint).run()
         } else if (status < 200 || status >= 300) {

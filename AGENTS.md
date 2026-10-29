@@ -40,7 +40,8 @@ Reference: [product-manager.md](https://github.com/msitarzewski/agency-agents/bl
 
 Reference: [design-ui-designer.md](https://github.com/msitarzewski/agency-agents/blob/main/design/design-ui-designer.md)
 
-- Maintain a coherent Violet Focus design system: lavender surfaces, violet hierarchy, restrained glass effects, reusable tokens and components.
+- Treat [`DESIGN.md`](DESIGN.md) as the source of truth for Violet Focus visual tokens, layout, mobile behavior, and component states.
+- Maintain a coherent design system: lavender surfaces, violet hierarchy, restrained glass effects, reusable tokens and components.
 - Establish hierarchy so the current task is immediately obvious.
 - Design mobile-first, responsive, keyboard-operable interfaces with WCAG AA contrast as a baseline.
 - Include meaningful empty, loading, error, overdue, and completed states; use motion sparingly and respect reduced-motion preferences.
@@ -62,6 +63,14 @@ Reference: [engineering-backend-architect.md](https://github.com/msitarzewski/ag
 - Protect push subscription data and secrets; never expose VAPID private keys or credentials to browser code.
 - Make scheduled reminder processing idempotent, bounded, and respectful of user settings.
 - Document free-tier assumptions and operational limitations; push notifications are best-effort, not guaranteed alarms.
+
+### Security audit reviewer
+
+Reference: [Cloudflare security-audit-skill](https://github.com/cloudflare/security-audit-skill) (MIT; methodology reference, not vendored into the app).
+
+- Before exposing Worker APIs publicly, trace trust boundaries, authentication, CORS, input validation, secrets, D1 access, push endpoints, and scheduled-job idempotency.
+- Separate confirmed vulnerabilities from unresolved questions and hardening suggestions; verify findings against current source and tests.
+- The upstream full audit expects isolated parallel agents and an OS-enforced sandbox. Do not claim that full workflow ran unless those prerequisites are actually met; otherwise perform and label a scoped review honestly.
 
 ### Behavioral reminders reviewer
 
