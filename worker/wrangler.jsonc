@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "daytask",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-29",
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "hbkd1",
+      "database_name": "hbkdaytask",
+      "database_id": "f7c15949-a1c6-4132-9253-a2cec77a9e04",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": { "crons": ["* * * * *"] },
+  "vars": {
+    "APP_ORIGIN": "https://REPLACE_WITH_YOUR_PAGES_HOST.pages.dev",
+    "VAPID_SUBJECT": "mailto:REPLACE_WITH_YOUR_EMAIL",
+    "VAPID_PUBLIC_KEY": "REPLACE_WITH_VAPID_PUBLIC_KEY"
+  }
+}
