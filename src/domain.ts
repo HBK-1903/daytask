@@ -5,6 +5,17 @@ export function isHabitScheduledOnWeekday(frequencyMode: 'weekly' | 'selectedDay
   return scheduledDays.includes(weekday)
 }
 
+export type HabitCalendarState = 'completed' | 'missed' | 'today' | 'upcoming' | 'flexible' | 'off'
+
+export function getHabitCalendarState(date: string, todayKey: string, isCompleted: boolean, frequencyMode: 'weekly' | 'selectedDays' | undefined, scheduledDays: number[] | undefined): HabitCalendarState {
+  if (isCompleted) return 'completed'
+  if (frequencyMode !== 'selectedDays' || !scheduledDays?.length) return 'flexible'
+  const weekday = (new Date(`${date}T00:00:00`).getDay() + 6) % 7 + 1
+  if (!scheduledDays.includes(weekday)) return 'off'
+  if (date === todayKey) return 'today'
+  return date < todayKey ? 'missed' : 'upcoming'
+}
+
 export function getHabitWeekMetrics(checkDates: string[], weeklyTarget: number, weekKeys: string[]): HabitWeekMetrics {
   const includedDays = new Set(weekKeys)
   const checkCount = new Set(checkDates.filter((date) => includedDays.has(date))).size

@@ -1,6 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { getElapsedSeconds, getHabitWeekMetrics, isHabitScheduledOnWeekday, getReminderSyncFailure, getSnoozeDate, isTaskCountableForAnalytics } from '../.test-dist/domain.js'
+import { getElapsedSeconds, getHabitCalendarState, getHabitWeekMetrics, isHabitScheduledOnWeekday, getReminderSyncFailure, getSnoozeDate, isTaskCountableForAnalytics } from '../.test-dist/domain.js'
+
+test('habit calendar separates completed, planned-missed, today, upcoming, and off-schedule dates', () => {
+  assert.equal(getHabitCalendarState('2026-10-26', '2026-10-30', true, 'selectedDays', [1, 3, 5]), 'completed')
+  assert.equal(getHabitCalendarState('2026-10-28', '2026-10-30', false, 'selectedDays', [1, 3, 5]), 'missed')
+  assert.equal(getHabitCalendarState('2026-10-30', '2026-10-30', false, 'selectedDays', [1, 3, 5]), 'today')
+  assert.equal(getHabitCalendarState('2026-10-31', '2026-10-30', false, 'selectedDays', [1, 3, 5]), 'off')
+  assert.equal(getHabitCalendarState('2026-11-02', '2026-10-30', false, 'selectedDays', [1, 3, 5]), 'upcoming')
+  assert.equal(getHabitCalendarState('2026-10-28', '2026-10-30', false, 'weekly', undefined), 'flexible')
+})
 
 test('weekday-specific habits only count toward the selected weekdays while legacy weekly habits remain eligible', () => {
   assert.equal(isHabitScheduledOnWeekday('selectedDays', [1, 3, 5], 3), true)
