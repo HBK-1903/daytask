@@ -9,10 +9,12 @@ npm install
 npm run dev
 ```
 
-Üretim derlemesi:
+Üretim derlemesi ve domain testleri:
 
 ```bash
 npm run build
+npm test
+npm --prefix worker run typecheck
 ```
 
 ## PWA'yı iPhone'a ekleme
