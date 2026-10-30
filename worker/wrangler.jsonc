@@ -14,7 +14,7 @@
   ],
   "triggers": { "crons": ["* * * * *"] },
   "vars": {
-    "APP_ORIGIN": "https://daytask-aaj.pages.dev",
+    "APP_ORIGIN": "https://hbktask.page.dev",
     "VAPID_SUBJECT": "mailto:REPLACE_WITH_YOUR_EMAIL",
     "VAPID_PUBLIC_KEY": "REPLACE_WITH_VAPID_PUBLIC_KEY"
   }
