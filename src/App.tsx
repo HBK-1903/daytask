@@ -1,89 +1,731 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlarmClock, ArrowRight, ArrowUpRight, Bell, BookOpen, CalendarDays,
+  AlarmClock, ArrowRight, ArrowDownToLine, Upload, Bell, BookOpen, CalendarDays,
   Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3,
   Flame, Flower2, Focus, LayoutGrid, Menu, MoreHorizontal, Pause,
-  Play, Plus, Search, Settings2, Sparkles, Target, TrendingUp, X, Zap,
+  Play, Plus, Search, Pencil, Trash2, Undo2, ShieldCheck, Settings2, Sparkles, Target, TrendingUp, X, Zap,
 } from 'lucide-react'
 
 type Tab = 'Şimdi' | 'Takvim' | 'Alışkanlıklar' | 'Öğrenme' | 'Analiz'
-type Task = { id: number; title: string; category: string; time: string; duration: number; done: boolean; color: string; icon: string }
-const initialTasks: Task[] = [
-  { id: 1, title: 'İngilizce listening pratiği', category: 'Öğrenme', time: '10:00', duration: 45, done: false, color: 'violet', icon: 'book' },
-  { id: 2, title: 'Kısa yürüyüş ve temiz hava', category: 'Sağlık', time: '11:15', duration: 30, done: false, color: 'mint', icon: 'flower' },
-  { id: 3, title: 'Proje için fikirleri toparla', category: 'Kişisel', time: '13:00', duration: 60, done: false, color: 'peach', icon: 'target' },
-  { id: 4, title: 'Bir bölüm kitap oku', category: 'Hobiler', time: '16:30', duration: 25, done: true, color: 'blue', icon: 'book' },
+type Task = { id: number; title: string; category: string; time: string; duration: number; done: boolean; archived?: boolean; color: string; icon: string; date?: string; createdAt?: number; completedAt?: number; isExample?: boolean; priority?: 'low' | 'normal' | 'high'; energy?: 'light' | 'steady' | 'deep'; notes?: string }
+type Habit = { id: number; name: string; detail: string; icon: string; progress: number; checked: boolean; checkDates?: string[]; weeklyTarget?: number; isExample?: boolean }
+type FocusSession = { id: number; date: string; seconds: number; category: string; taskTitle: string; endedAt: number }
+type ManualStudyLog = { id: number; title: string; date: string; minutes: number; note: string; goalId?: number; loggedAt: number }
+type LearningMilestone = { id: number; title: string; done: boolean; completedAt?: number }
+type LearningGoal = { id: number; title: string; description: string; milestones: LearningMilestone[]; createdAt: number }
+type UndoAction = { kind: 'delete' | 'snooze'; task: Task }
+type PendingMove = { taskId: number; targetDate: string; originalDate: string; originalTime: string }
+type PomodoroKey = '25-5' | '45-10' | '50-10'
+type BackupData = { format: 'violet-focus-backup-v1'; tasks: Task[]; habits: Habit[]; focusSessions: FocusSession[]; manualStudyLogs: ManualStudyLog[]; learningGoals: LearningGoal[]; customCategories?: string[]; settings?: { pomodoroKey?: PomodoroKey; availableMinutes?: number; recommendationEnergy?: 'light' | 'steady' | 'deep' } }
+type EncryptedVault = { salt: string; iv: string; ciphertext: string; updatedAt?: number }
+const pomodoroPresets: { key: PomodoroKey; label: string; focus: number; rest: number }[] = [
+  { key: '25-5', label: 'Kısa', focus: 25, rest: 5 },
+  { key: '45-10', label: 'Standart', focus: 45, rest: 10 },
+  { key: '50-10', label: 'Uzun', focus: 50, rest: 10 },
 ]
-const initialHabits = [
-  { id: 1, name: 'Su iç', detail: 'Günlük · 6 / 8 bardak', icon: 'drop', progress: 75, checked: false },
-  { id: 2, name: 'Kitap oku', detail: 'Günlük · 20 dakika', icon: 'book', progress: 100, checked: true },
-  { id: 3, name: 'Esneme', detail: 'Haftada 4 kez · 2 / 4', icon: 'spark', progress: 50, checked: false },
+const initialTasks: Task[] = [
+  { id: 1, title: 'İngilizce listening pratiği', category: 'Öğrenme', time: '10:00', duration: 45, done: false, color: 'violet', icon: 'book', date: dateKey(new Date()), isExample: true },
+  { id: 2, title: 'Kısa yürüyüş ve temiz hava', category: 'Sağlık', time: '11:15', duration: 30, done: false, color: 'mint', icon: 'flower', date: dateKey(new Date()), isExample: true },
+  { id: 3, title: 'Proje için fikirleri toparla', category: 'Kişisel', time: '13:00', duration: 60, done: false, color: 'peach', icon: 'target', date: dateKey(new Date()), isExample: true },
+  { id: 4, title: 'Bir bölüm kitap oku', category: 'Hobiler', time: '16:30', duration: 25, done: true, color: 'blue', icon: 'book', date: dateKey(new Date()), completedAt: Date.now(), isExample: true },
+]
+const initialHabits: Habit[] = [
+  { id: 1, name: 'Su iç', detail: 'Günlük · 6 / 8 bardak', icon: 'drop', progress: 75, checked: false, weeklyTarget: 7, checkDates: [], isExample: true },
+  { id: 2, name: 'Kitap oku', detail: 'Günlük · 20 dakika', icon: 'book', progress: 100, checked: true, weeklyTarget: 7, checkDates: [dateKey(new Date())], isExample: true },
+  { id: 3, name: 'Esneme', detail: 'Haftada 4 kez · 2 / 4', icon: 'spark', progress: 50, checked: false, weeklyTarget: 4, checkDates: [], isExample: true },
 ]
 const navItems: { label: Tab; icon: typeof Focus }[] = [
   { label: 'Şimdi', icon: Focus }, { label: 'Takvim', icon: CalendarDays },
   { label: 'Alışkanlıklar', icon: Flower2 }, { label: 'Öğrenme', icon: BookOpen }, { label: 'Analiz', icon: LayoutGrid },
 ]
 const week = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz']
+const taskCategories: { label: string; icon: typeof Focus; tone: string; description: string }[] = [
+  { label: 'Öğrenme', icon: BookOpen, tone: 'violet', description: 'Ders, okuma veya yeni bir beceri' },
+  { label: 'Sağlık', icon: Flower2, tone: 'mint', description: 'Hareket, dinlenme ve öz bakım' },
+  { label: 'İş/Okul', icon: Target, tone: 'blue', description: 'İş teslimi, ders veya toplantı' },
+  { label: 'Hobiler', icon: Sparkles, tone: 'peach', description: 'Yaratıcılık ve keyif zamanı' },
+  { label: 'Kişisel', icon: Focus, tone: 'lilac', description: 'Kişisel işler ve hedefler' },
+  { label: 'Ev', icon: CalendarDays, tone: 'gold', description: 'Ev işleri ve günlük düzen' },
+]
+const durationChoices = [15, 25, 30, 45, 60, 90]
+const priorityChoices = [
+  { value: 'low', label: 'Esnek', note: 'Uygun olduğunda', icon: Sparkles },
+  { value: 'normal', label: 'Normal', note: 'Günlük akışta', icon: CalendarDays },
+  { value: 'high', label: 'Öncelikli', note: 'Önce bunu ele al', icon: Zap },
+] as const
+const energyChoices = [
+  { value: 'light', label: 'Hafif', note: 'Düşük efor', icon: Flower2 },
+  { value: 'steady', label: 'Dengeli', note: 'Orta efor', icon: Focus },
+  { value: 'deep', label: 'Derin odak', note: 'Kesintisiz çalışma', icon: Zap },
+] as const
+function dateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+function readStored<T>(key: string, fallback: T): T {
+  try {
+    const saved = localStorage.getItem(key)
+    return saved ? JSON.parse(saved) as T : fallback
+  } catch {
+    return fallback
+  }
+}
+function parseBackup(value: unknown): BackupData {
+  if (!value || typeof value !== 'object') throw new Error('Yedek yapısı tanınmadı.')
+  const backup = value as Partial<BackupData>
+  if (backup.format !== 'violet-focus-backup-v1' || !Array.isArray(backup.tasks) || !Array.isArray(backup.habits) || !Array.isArray(backup.focusSessions) || !Array.isArray(backup.manualStudyLogs) || !Array.isArray(backup.learningGoals)) throw new Error('Yedek yapısı tanınmadı.')
+  if (backup.customCategories !== undefined && (!Array.isArray(backup.customCategories) || backup.customCategories.some((category) => typeof category !== 'string' || category.length > 24))) throw new Error('Özel kategoriler geçersiz.')
+  if (backup.tasks.some((task) => !task || typeof task.id !== 'number' || typeof task.title !== 'string' || typeof task.category !== 'string' || typeof task.time !== 'string' || typeof task.duration !== 'number' || typeof task.done !== 'boolean') || backup.habits.some((habit) => !habit || typeof habit.id !== 'number' || typeof habit.name !== 'string' || !Array.isArray(habit.checkDates ?? [])) || backup.focusSessions.some((session) => !session || typeof session.id !== 'number' || typeof session.seconds !== 'number' || typeof session.date !== 'string') || backup.manualStudyLogs.some((log) => !log || typeof log.id !== 'number' || typeof log.title !== 'string' || typeof log.minutes !== 'number' || typeof log.date !== 'string') || backup.learningGoals.some((goal) => !goal || typeof goal.id !== 'number' || typeof goal.title !== 'string' || !Array.isArray(goal.milestones))) throw new Error('Yedekteki bazı kayıtlar geçersiz.')
+  return backup as BackupData
+}
+function toBase64Url(bytes: Uint8Array) {
+  let binary = ''
+  for (const byte of bytes) binary += String.fromCharCode(byte)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+function fromBase64Url(value: string) {
+  const base64 = value.replace(/-/g, '+').replace(/_/g, '/')
+  const binary = atob(base64 + '='.repeat((4 - base64.length % 4) % 4))
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0))
+}
+async function deriveSyncKey(passphrase: string, salt: Uint8Array) {
+  const material = await crypto.subtle.importKey('raw', new TextEncoder().encode(passphrase), 'PBKDF2', false, ['deriveKey'])
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 310000, hash: 'SHA-256' }, material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'])
+}
+function formatDuration(seconds: number) {
+  if (seconds === 0) return '0 dk'
+  if (seconds < 60) return `${seconds} sn`
+  const minutes = Math.floor(seconds / 60)
+  const hours = Math.floor(minutes / 60)
+  return hours ? `${hours} sa ${minutes % 60} dk` : `${minutes} dk`
+}
+function longestStreak(dateKeys: string[]) {
+  const days = [...new Set(dateKeys)].sort()
+  let longest = 0
+  let current = 0
+  let previous: Date | undefined
+  days.forEach((key) => {
+    const day = new Date(`${key}T00:00:00`)
+    if (previous) {
+      const expected = new Date(previous)
+      expected.setDate(expected.getDate() + 1)
+      current = dateKey(expected) === key ? current + 1 : 1
+    } else current = 1
+    longest = Math.max(longest, current)
+    previous = day
+  })
+  return longest
+}
 
 function App() {
+  const importInputRef = useRef<HTMLInputElement>(null)
   const [activeTab, setActiveTab] = useState<Tab>('Şimdi')
-  const [tasks, setTasks] = useState<Task[]>(() => {
-    const saved = localStorage.getItem('vf-tasks')
-    return saved ? JSON.parse(saved) as Task[] : initialTasks
+  const [tasks, setTasks] = useState<Task[]>(() => readStored<Task[]>('vf-tasks', initialTasks).map((task) => ({ ...task, date: task.date ?? dateKey(new Date()) })))
+  const [habits, setHabits] = useState<Habit[]>(() => {
+    const today = dateKey(new Date())
+    return readStored<Habit[]>('vf-habits', initialHabits).map((habit) => {
+      const checkDates = habit.checkDates ?? (habit.checked ? [today] : [])
+      return { ...habit, checkDates, checked: checkDates.includes(today) }
+    })
   })
-  const [habits, setHabits] = useState(initialHabits)
+  const [focusSessions, setFocusSessions] = useState<FocusSession[]>(() => readStored<FocusSession[]>('vf-focus-sessions', []))
+  const [manualStudyLogs, setManualStudyLogs] = useState<ManualStudyLog[]>(() => readStored<ManualStudyLog[]>('vf-study-logs', []))
+  const [learningGoals, setLearningGoals] = useState<LearningGoal[]>(() => readStored<LearningGoal[]>('vf-learning-goals', []))
+  const [focusTaskId, setFocusTaskId] = useState<number | null>(null)
+  const [availableMinutes, setAvailableMinutes] = useState(() => readStored('vf-available-minutes', 30))
+  const [recommendationEnergy, setRecommendationEnergy] = useState<'light' | 'steady' | 'deep'>(() => readStored('vf-recommendation-energy', 'steady'))
   const [timerRunning, setTimerRunning] = useState(false)
+  const [timerPhase, setTimerPhase] = useState<'focus' | 'breakReady' | 'break'>('focus')
+  const [pomodoroElapsed, setPomodoroElapsed] = useState(0)
+  const [pomodoroKey, setPomodoroKey] = useState<PomodoroKey>(() => readStored<PomodoroKey>('vf-pomodoro-key', '25-5'))
   const [seconds, setSeconds] = useState(0)
   const [modalOpen, setModalOpen] = useState(false)
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
+  const [undoAction, setUndoAction] = useState<UndoAction | null>(null)
+  const [habitModalOpen, setHabitModalOpen] = useState(false)
+  const [studyLogModalOpen, setStudyLogModalOpen] = useState(false)
+  const [goalModalOpen, setGoalModalOpen] = useState(false)
+  const [studyLogTitle, setStudyLogTitle] = useState('')
+  const [studyLogMinutes, setStudyLogMinutes] = useState(30)
+  const [studyLogDate, setStudyLogDate] = useState(() => dateKey(new Date()))
+  const [studyLogNote, setStudyLogNote] = useState('')
+  const [studyLogGoalId, setStudyLogGoalId] = useState('')
+  const [goalTitle, setGoalTitle] = useState('')
+  const [goalDescription, setGoalDescription] = useState('')
+  const [goalFirstMilestone, setGoalFirstMilestone] = useState('')
+  const [milestoneDrafts, setMilestoneDrafts] = useState<Record<number, string>>({})
   const [taskName, setTaskName] = useState('')
+  const [taskDate, setTaskDate] = useState(() => dateKey(new Date()))
+  const [taskTime, setTaskTime] = useState('18:00')
+  const [taskCategory, setTaskCategory] = useState('Kişisel')
+  const [taskDuration, setTaskDuration] = useState(30)
+  const [taskPriority, setTaskPriority] = useState<'low' | 'normal' | 'high'>('normal')
+  const [taskEnergy, setTaskEnergy] = useState<'light' | 'steady' | 'deep'>('steady')
+  const [taskNotes, setTaskNotes] = useState('')
+  const [plannerStep, setPlannerStep] = useState<1 | 2>(1)
+  const [habitName, setHabitName] = useState('')
+  const [habitWeeklyTarget, setHabitWeeklyTarget] = useState(7)
   const [toast, setToast] = useState('')
   const [mobileMenu, setMobileMenu] = useState(false)
-  const [selectedDay, setSelectedDay] = useState('Per')
-  const [remindersOn, setRemindersOn] = useState(false)
+  const [selectedDay, setSelectedDay] = useState(() => dateKey(new Date()))
+  const [calendarAnchor, setCalendarAnchor] = useState(() => dateKey(new Date()))
+  const [moveSelectionTaskId, setMoveSelectionTaskId] = useState<number | null>(null)
+  const [pendingMove, setPendingMove] = useState<PendingMove | null>(null)
+  const [draggingTaskId, setDraggingTaskId] = useState<number | null>(null)
+  const [remindersOn, setRemindersOn] = useState(() => readStored('vf-reminders-enabled', false))
+  const syncedReminderIdsRef = useRef<number[]>(readStored('vf-reminder-task-ids', []))
+  const [customCategories, setCustomCategories] = useState<string[]>(() => readStored('vf-custom-categories', []))
+  const [customCategoryDraft, setCustomCategoryDraft] = useState('')
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [showArchived, setShowArchived] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [syncApiUrl, setSyncApiUrl] = useState(() => readStored('vf-sync-api', 'https://daytask.hasanbekirk02.workers.dev'))
+  const [syncToken, setSyncToken] = useState(() => readStored('vf-sync-token', ''))
+  const [syncPassword, setSyncPassword] = useState('')
+  const [syncPassphrase, setSyncPassphrase] = useState('')
+  const [syncStatus, setSyncStatus] = useState('')
+  const [quietStart, setQuietStart] = useState('22:00')
+  const [quietEnd, setQuietEnd] = useState('08:00')
+  const [reminderWording, setReminderWording] = useState<'brief' | 'task'>('brief')
+  const [privacyMode, setPrivacyMode] = useState(true)
 
+  const availableCategories = useMemo(() => [...taskCategories, ...customCategories.map((label) => ({ label, icon: Focus, tone: 'lilac', description: 'Özel kategori' }))], [customCategories])
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const action = params.get('action')
+    const reminderTaskId = params.get('reminderTask')
+    if (action === 'add-task') openNewTaskModal()
+    else if (action === 'calendar') setActiveTab('Takvim')
+    else if (action === 'start-focus') { setActiveTab('Şimdi'); setTimerPhase('focus'); setTimerRunning(true) }
+    else if (reminderTaskId) {
+      const task = tasks.find((item) => String(item.id) === reminderTaskId)
+      setActiveTab('Takvim')
+      if (task) { setSelectedDay(task.date ?? todayKey); setCalendarAnchor(task.date ?? todayKey) }
+      else setToast('Hatırlatmanın görevi bu cihazda bulunamadı; eşitleme durumunu kontrol et.')
+    }
+    if (action || reminderTaskId) window.history.replaceState({}, '', window.location.pathname)
+  }, [])
   useEffect(() => { localStorage.setItem('vf-tasks', JSON.stringify(tasks)) }, [tasks])
+  useEffect(() => { localStorage.setItem('vf-custom-categories', JSON.stringify(customCategories)) }, [customCategories])
+  useEffect(() => { localStorage.setItem('vf-sync-api', JSON.stringify(syncApiUrl)) }, [syncApiUrl])
+  useEffect(() => { localStorage.setItem('vf-sync-token', JSON.stringify(syncToken)) }, [syncToken])
+  useEffect(() => { localStorage.setItem('vf-reminders-enabled', JSON.stringify(remindersOn)) }, [remindersOn])
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) { setRemindersOn(false); return }
+    navigator.serviceWorker.ready.then((registration) => registration.pushManager.getSubscription()).then((subscription) => setRemindersOn(Boolean(subscription))).catch(() => setRemindersOn(false))
+  }, [])
+  useEffect(() => {
+    if (!settingsOpen || !syncToken) return
+    fetch(`${syncApiUrl}/api/sync`, { headers: { authorization: `Bearer ${syncToken}` } }).then((response) => {
+      if (response.status === 401) { setSyncToken(''); setSyncStatus('Worker oturumu sona ermiş. Yeniden giriş yapman gerekiyor.') }
+      else if (response.status >= 500) setSyncStatus('Worker yanıt verdi ancak veritabanı hazır değil; migration ve secrets ayarını kontrol et.')
+    }).catch(() => setSyncStatus('Worker bağlantısı kurulamadı; adresi veya internet bağlantısını kontrol et.'))
+    fetch(`${syncApiUrl}/api/reminders/settings`, { headers: { authorization: `Bearer ${syncToken}` } }).then((response) => response.ok ? response.json() : null).then((result) => {
+      const settings = result?.settings
+      if (settings) { setQuietStart(settings.quietStart); setQuietEnd(settings.quietEnd); setReminderWording(settings.wording); setPrivacyMode(settings.privacyMode) }
+    }).catch(() => undefined)
+  }, [settingsOpen, syncApiUrl, syncToken])
+  useEffect(() => {
+    if (!remindersOn || !syncToken) return
+    const id = window.setTimeout(() => {
+      const currentIds = tasks.map((task) => task.id)
+      const headers = { authorization: `Bearer ${syncToken}` }
+      const removed = syncedReminderIdsRef.current.filter((taskId) => !currentIds.includes(taskId)).map((taskId) => fetch(`${syncApiUrl}/api/tasks/${encodeURIComponent(String(taskId))}`, { method: 'DELETE', headers }))
+      const requests = tasks.map((task) => {
+        const dueAt = new Date(`${task.date ?? dateKey(new Date())}T${task.time}:00`).getTime()
+        const status = task.archived ? 'dismissed' : task.done ? 'completed' : 'pending'
+        return fetch(`${syncApiUrl}/api/tasks`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify({ id: String(task.id), title: task.title, category: task.category, dueAt, durationMinutes: task.duration, status }) })
+      })
+      syncedReminderIdsRef.current = currentIds
+      localStorage.setItem('vf-reminder-task-ids', JSON.stringify(currentIds))
+      void Promise.allSettled([...removed, ...requests])
+    }, 500)
+    return () => window.clearTimeout(id)
+  }, [tasks, remindersOn, syncToken, syncApiUrl])
+  useEffect(() => { localStorage.setItem('vf-habits', JSON.stringify(habits)) }, [habits])
+  useEffect(() => { localStorage.setItem('vf-focus-sessions', JSON.stringify(focusSessions)) }, [focusSessions])
+  useEffect(() => { localStorage.setItem('vf-study-logs', JSON.stringify(manualStudyLogs)) }, [manualStudyLogs])
+  useEffect(() => { localStorage.setItem('vf-learning-goals', JSON.stringify(learningGoals)) }, [learningGoals])
+  useEffect(() => { localStorage.setItem('vf-pomodoro-key', pomodoroKey) }, [pomodoroKey])
+  useEffect(() => { localStorage.setItem('vf-available-minutes', JSON.stringify(availableMinutes)) }, [availableMinutes])
+  useEffect(() => { localStorage.setItem('vf-recommendation-energy', JSON.stringify(recommendationEnergy)) }, [recommendationEnergy])
   useEffect(() => {
     if (!timerRunning) return
-    const id = window.setInterval(() => setSeconds((value) => value + 1), 1000)
+    const id = window.setInterval(() => {
+      setSeconds((value) => value + 1)
+      if (timerPhase === 'focus') setPomodoroElapsed((value) => value + 1)
+    }, 1000)
     return () => window.clearInterval(id)
-  }, [timerRunning])
+  }, [timerRunning, timerPhase])
   useEffect(() => {
     if (!toast) return
-    const id = window.setTimeout(() => setToast(''), 2800)
+    const canUndo = toast === 'Görev silindi.' || toast === 'Görev 10 dakika ertelendi.'
+    const id = window.setTimeout(() => { setToast(''); setUndoAction(null) }, canUndo ? 5000 : 2800)
     return () => window.clearTimeout(id)
   }, [toast])
 
-  const nextTask = useMemo(() => tasks.find((task) => !task.done), [tasks])
-  const doneCount = tasks.filter((task) => task.done).length
-  const progress = Math.round((doneCount / Math.max(tasks.length, 1)) * 100)
   const now = new Date()
   const dateLabel = new Intl.DateTimeFormat('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' }).format(now)
-  const timerLabel = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
-
-  function completeTask(id: number) {
-    setTasks((items) => items.map((item) => item.id === id ? { ...item, done: true } : item))
+  const dateUpper = dateLabel.toLocaleUpperCase('tr-TR')
+  const todayKey = dateKey(now)
+  const todayTasks = useMemo(() => tasks.filter((task) => !task.archived && (task.date ?? todayKey) === todayKey), [tasks, todayKey])
+  const scheduledNextTask = useMemo(() => todayTasks.filter((task) => !task.done).sort((a, b) => a.time.localeCompare(b.time))[0], [todayTasks])
+  const selectedFocusTask = todayTasks.find((task) => task.id === focusTaskId && !task.done)
+  const nextTask = selectedFocusTask ?? scheduledNextTask
+  const doneCount = todayTasks.filter((task) => task.done).length
+  const progress = Math.round((doneCount / Math.max(todayTasks.length, 1)) * 100)
+  const plannedMinutes = todayTasks.reduce((sum, task) => sum + task.duration, 0)
+  const energyRank = { light: 1, steady: 2, deep: 3 }
+  const recommendationRank = energyRank[recommendationEnergy]
+  const recommendedTasks = todayTasks.filter((task) => !task.done && task.duration <= availableMinutes && energyRank[task.energy ?? 'steady'] <= recommendationRank).sort((a, b) => (b.priority === 'high' ? 1 : b.priority === 'normal' ? 0 : -1) - (a.priority === 'high' ? 1 : a.priority === 'normal' ? 0 : -1) || a.time.localeCompare(b.time)).slice(0, 3)
+  const focusTodaySeconds = focusSessions.filter((session) => session.date === todayKey).reduce((sum, session) => sum + session.seconds, 0)
+  const learningTodaySeconds = focusSessions.filter((session) => session.date === todayKey && session.category === 'Öğrenme').reduce((sum, session) => sum + session.seconds, 0) + manualStudyLogs.filter((log) => log.date === todayKey).reduce((sum, log) => sum + log.minutes * 60, 0)
+  const checkedHabitsToday = habits.filter((habit) => habit.checked).length
+  const habitProgress = habits.length ? Math.round((checkedHabitsToday / habits.length) * 100) : 0
+  const longestHabitDays = Math.max(0, ...habits.map((habit) => longestStreak(habit.checkDates ?? [])))
+  const habitHeatmapDays = Array.from({ length: 28 }, (_, index) => {
+    const day = new Date(now)
+    day.setDate(day.getDate() - 27 + index)
+    const key = dateKey(day)
+    return { key, count: habits.filter((habit) => (habit.checkDates ?? []).includes(key)).length }
+  })
+  const calendarWeek = useMemo(() => {
+    const anchor = new Date(`${calendarAnchor}T00:00:00`)
+    anchor.setHours(0, 0, 0, 0)
+    anchor.setDate(anchor.getDate() - ((anchor.getDay() + 6) % 7))
+    return Array.from({ length: 7 }, (_, index) => {
+      const day = new Date(anchor)
+      day.setDate(anchor.getDate() + index)
+      return day
+    })
+  }, [calendarAnchor])
+  const analysisWeek = useMemo(() => {
+    const monday = new Date(now)
+    monday.setHours(0, 0, 0, 0)
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7))
+    return Array.from({ length: 7 }, (_, index) => {
+      const day = new Date(monday)
+      day.setDate(monday.getDate() + index)
+      return day
+    })
+  }, [todayKey])
+  const focusWeekByDay = analysisWeek.map((day) => focusSessions.filter((session) => session.date === dateKey(day)).reduce((sum, session) => sum + session.seconds, 0))
+  const planWeekByDay = analysisWeek.map((day) => tasks.filter((task) => !task.archived && (task.date ?? todayKey) === dateKey(day)).reduce((sum, task) => sum + task.duration, 0))
+  const maxWeeklyMinutes = Math.max(60, ...focusWeekByDay.map((seconds) => seconds / 60), ...planWeekByDay)
+  const weeklyTimerStudySeconds = focusSessions.filter((session) => session.category === 'Öğrenme' && analysisWeek.some((day) => dateKey(day) === session.date)).reduce((sum, session) => sum + session.seconds, 0)
+  const weeklyManualStudySeconds = manualStudyLogs.filter((log) => analysisWeek.some((day) => dateKey(day) === log.date)).reduce((sum, log) => sum + log.minutes * 60, 0)
+  const weeklyStudySeconds = weeklyTimerStudySeconds + weeklyManualStudySeconds
+  const weeklyHabitChecks = habits.reduce((sum, habit) => sum + (habit.checkDates ?? []).filter((date) => analysisWeek.some((day) => dateKey(day) === date)).length, 0)
+  const weeklyHabitTarget = habits.reduce((sum, habit) => sum + (habit.weeklyTarget ?? 7), 0)
+  const weeklyHabitProgress = weeklyHabitTarget ? Math.min(100, Math.round((weeklyHabitChecks / weeklyHabitTarget) * 100)) : 0
+  const weeklyTasks = tasks.filter((task) => !task.archived && analysisWeek.some((day) => dateKey(day) === (task.date ?? todayKey)))
+  const weeklyDoneTasks = weeklyTasks.filter((task) => task.done).length
+  const weeklyCompletion = weeklyTasks.length ? Math.round((weeklyDoneTasks / weeklyTasks.length) * 100) : 0
+  const weeklyFocusSeconds = focusWeekByDay.reduce((sum, seconds) => sum + seconds, 0)
+  const weeklyPlanMinutes = planWeekByDay.reduce((sum, minutes) => sum + minutes, 0)
+  const recordedOfPlanned = weeklyPlanMinutes ? Math.min(100, Math.round((weeklyFocusSeconds / 60 / weeklyPlanMinutes) * 100)) : 0
+  const weeklySessionCount = focusSessions.filter((session) => analysisWeek.some((day) => dateKey(day) === session.date)).length
+  const weeklyCategoryTotals = [...new Set(focusSessions.filter((session) => analysisWeek.some((day) => dateKey(day) === session.date)).map((session) => session.category))].map((category) => ({ category, seconds: focusSessions.filter((session) => session.category === category && analysisWeek.some((day) => dateKey(day) === session.date)).reduce((sum, session) => sum + session.seconds, 0) })).sort((a, b) => b.seconds - a.seconds)
+  const learningTasks = tasks.filter((task) => !task.archived && task.category === 'Öğrenme')
+  const learningSessions = focusSessions.filter((session) => session.category === 'Öğrenme').sort((a, b) => b.endedAt - a.endedAt)
+  const studyLogEntries = [
+    ...learningSessions.map((session) => ({ id: `timer-${session.id}`, title: session.taskTitle, dateLabel: new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(session.endedAt)), sortAt: session.endedAt, seconds: session.seconds, source: 'Zamanlayıcı', note: '' })),
+    ...manualStudyLogs.map((log) => ({ id: `manual-${log.id}`, title: log.title, dateLabel: new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' }).format(new Date(`${log.date}T12:00:00`)), sortAt: log.loggedAt, seconds: log.minutes * 60, source: 'Manuel kayıt', note: log.note })),
+  ] .sort((a, b) => b.sortAt - a.sortAt)
+  const learningWeekByDay = analysisWeek.map((day) => focusSessions.filter((session) => session.category === 'Öğrenme' && session.date === dateKey(day)).reduce((sum, session) => sum + session.seconds, 0) + manualStudyLogs.filter((log) => log.date === dateKey(day)).reduce((sum, log) => sum + log.minutes * 60, 0))
+  const maxLearningMinutes = Math.max(30, ...learningWeekByDay.map((seconds) => seconds / 60))
+  const categoryPalette: Record<string, string> = { 'Öğrenme': '#8465df', 'Sağlık': '#61b7a5', 'İş/Okul': '#8d9de0', 'Hobiler': '#e29b77', 'Kişisel': '#b38de0', 'Ev': '#d1a566' }
+  const categoryTotalSeconds = weeklyCategoryTotals.reduce((sum, item) => sum + item.seconds, 0)
+  let categoryCursor = 0
+  const categoryDonutGradient = categoryTotalSeconds ? `conic-gradient(${weeklyCategoryTotals.map((item) => { const start = categoryCursor; categoryCursor += item.seconds / categoryTotalSeconds * 100; return `${categoryPalette[item.category] ?? '#a89aba'} ${start}% ${categoryCursor}%` }).join(', ')})` : 'conic-gradient(#e8e2f0 0% 100%)'
+  const selectedTasks = tasks.filter((task) => !task.archived && (task.date ?? todayKey) === selectedDay).sort((a, b) => a.time.localeCompare(b.time))
+  const selectedPlannedMinutes = selectedTasks.reduce((sum, task) => sum + task.duration, 0)
+  const searchResults = tasks.filter((task) => (showArchived ? Boolean(task.archived) : !task.archived) && (!searchQuery.trim() || `${task.title} ${task.category} ${task.notes ?? ''}`.toLocaleLowerCase('tr-TR').includes(searchQuery.trim().toLocaleLowerCase('tr-TR')))).sort((a, b) => (a.date ?? todayKey).localeCompare(b.date ?? todayKey) || a.time.localeCompare(b.time))
+  const selectedCalendarDate = calendarWeek.find((day) => dateKey(day) === selectedDay) ?? new Date(`${selectedDay}T00:00:00`)
+  const selectedCalendarLabel = new Intl.DateTimeFormat('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' }).format(selectedCalendarDate).toLocaleUpperCase('tr-TR')
+  const pomodoro = pomodoroPresets.find((preset) => preset.key === pomodoroKey) ?? pomodoroPresets[0]
+  const timerLimitSeconds = (timerPhase === 'break' || timerPhase === 'breakReady' ? pomodoro.rest : pomodoro.focus) * 60
+  const timerRemaining = timerPhase === 'focus' ? Math.max(0, timerLimitSeconds - pomodoroElapsed) : timerPhase === 'breakReady' ? timerLimitSeconds : Math.max(0, timerLimitSeconds - seconds)
+  const timerElapsed = timerPhase === 'focus' ? pomodoroElapsed : seconds
+  const timerLabel = `${String(Math.floor(timerRemaining / 60)).padStart(2, '0')}:${String(timerRemaining % 60).padStart(2, '0')}`
+  useEffect(() => {
+    if (!timerRunning || timerElapsed < timerLimitSeconds) return
     setTimerRunning(false)
     setSeconds(0)
-    setToast('Görev tamamlandı. Güzel iş!')
+    if (timerPhase === 'focus') {
+      const elapsed = seconds
+      if (elapsed >= 10) setFocusSessions((sessions) => [...sessions, { id: Date.now(), date: todayKey, seconds: elapsed, category: nextTask?.category ?? 'Kişisel', taskTitle: nextTask?.title ?? 'Serbest odak', endedAt: Date.now() }])
+      setPomodoroElapsed(0)
+      setTimerPhase('breakReady')
+      setToast(`Odak bölümü tamamlandı. ${pomodoro.rest} dakikalık mola hazır.`)
+    } else if (timerPhase === 'break') {
+      setTimerPhase('focus')
+      setToast('Mola tamamlandı. Yeni odak bölümüne hazır olduğunda başlayabilirsin.')
+    }
+  }, [timerRunning, seconds, timerElapsed, timerLimitSeconds, timerPhase, todayKey, nextTask, pomodoro.rest])
+  const hasExampleData = tasks.some((task) => task.isExample) || habits.some((habit) => habit.isExample)
+
+  function shiftCalendarWeek(direction: number) {
+    const next = new Date(`${selectedDay}T00:00:00`)
+    next.setDate(next.getDate() + direction * 7)
+    const key = dateKey(next)
+    setSelectedDay(key)
+    setCalendarAnchor(key)
+  }
+  function requestTaskMove(taskId: number, targetDate: string) {
+    const task = tasks.find((item) => item.id === taskId)
+    if (!task) return
+    const originalDate = task.date ?? todayKey
+    if (originalDate === targetDate) { setMoveSelectionTaskId(null); setToast('Görev zaten bu günde planlı.'); return }
+    setPendingMove({ taskId, targetDate, originalDate, originalTime: task.time })
+    setMoveSelectionTaskId(null)
+  }
+  function confirmTaskMove() {
+    if (!pendingMove) return
+    setTasks((items) => items.map((task) => task.id === pendingMove.taskId ? { ...task, date: pendingMove.targetDate } : task))
+    setSelectedDay(pendingMove.targetDate)
+    setCalendarAnchor(pendingMove.targetDate)
+    setPendingMove(null)
+    setToast('Görev seçtiğin güne taşındı.')
+  }
+  function removeExampleData() {
+    setTasks((items) => items.filter((task) => !task.isExample))
+    setHabits((items) => items.filter((habit) => !habit.isExample))
+    setToast('Başlangıç örnekleri kaldırıldı.')
+  }
+  function openNewTaskModal() {
+    setEditingTask(null)
+    setTaskName('')
+    setTaskDate(activeTab === 'Takvim' ? selectedDay : todayKey)
+    setTaskTime('18:00')
+    setTaskCategory(activeTab === 'Öğrenme' ? 'Öğrenme' : 'Kişisel')
+    setTaskDuration(30)
+    setTaskPriority('normal')
+    setTaskEnergy('steady')
+    setTaskNotes('')
+    setPlannerStep(1)
+    setModalOpen(true)
+  }
+  function openTaskEditor(task: Task) {
+    setEditingTask(task)
+    setTaskName(task.title)
+    setTaskDate(task.date ?? todayKey)
+    setTaskTime(task.time)
+    setTaskCategory(task.category)
+    setTaskDuration(task.duration)
+    setTaskPriority(task.priority ?? 'normal')
+    setTaskEnergy(task.energy ?? 'steady')
+    setTaskNotes(task.notes ?? '')
+    setPlannerStep(1)
+    setModalOpen(true)
+  }
+  function closeTaskModal() {
+    setModalOpen(false)
+    setEditingTask(null)
+    setTaskName('')
+    setTaskNotes('')
+    setPlannerStep(1)
+  }
+  function openHabitModal() {
+    setHabitName('')
+    setHabitWeeklyTarget(7)
+    setHabitModalOpen(true)
+  }
+  function openStudyLogModal() {
+    setStudyLogTitle('')
+    setStudyLogMinutes(30)
+    setStudyLogDate(todayKey)
+    setStudyLogNote('')
+    setStudyLogGoalId('')
+    setStudyLogModalOpen(true)
+  }
+  function openGoalModal() {
+    setGoalTitle('')
+    setGoalDescription('')
+    setGoalFirstMilestone('')
+    setGoalModalOpen(true)
+  }
+  function addManualStudyLog(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const title = studyLogTitle.trim()
+    if (!title || studyLogMinutes < 1) return
+    setManualStudyLogs((logs) => [...logs, { id: Date.now(), title, date: studyLogDate, minutes: studyLogMinutes, note: studyLogNote.trim(), goalId: studyLogGoalId ? Number(studyLogGoalId) : undefined, loggedAt: Date.now() }])
+    setStudyLogModalOpen(false)
+    setToast('Çalışma süresi kaydedildi.')
+  }
+  function addLearningGoal(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const title = goalTitle.trim()
+    if (!title) return
+    const firstStep = goalFirstMilestone.trim()
+    setLearningGoals((goals) => [...goals, { id: Date.now(), title, description: goalDescription.trim(), milestones: firstStep ? [{ id: Date.now() + 1, title: firstStep, done: false }] : [], createdAt: Date.now() }])
+    setGoalModalOpen(false)
+    setToast('Öğrenme hedefi eklendi.')
+  }
+  function toggleMilestone(goalId: number, milestoneId: number) {
+    setLearningGoals((goals) => goals.map((goal) => goal.id === goalId ? { ...goal, milestones: goal.milestones.map((step) => step.id === milestoneId ? { ...step, done: !step.done, completedAt: !step.done ? Date.now() : undefined } : step) } : goal))
+  }
+  function addMilestone(event: React.FormEvent<HTMLFormElement>, goalId: number) {
+    event.preventDefault()
+    const title = (milestoneDrafts[goalId] ?? '').trim()
+    if (!title) return
+    setLearningGoals((goals) => goals.map((goal) => goal.id === goalId ? { ...goal, milestones: [...goal.milestones, { id: Date.now(), title, done: false }] } : goal))
+    setMilestoneDrafts((drafts) => ({ ...drafts, [goalId]: '' }))
+  }
+  function saveFocusSession() {
+    const elapsed = seconds
+    if (timerPhase === 'focus' && elapsed >= 10) {
+      setFocusSessions((sessions) => [...sessions, {
+        id: Date.now(), date: todayKey, seconds: elapsed,
+        category: nextTask?.category ?? 'Kişisel', taskTitle: nextTask?.title ?? 'Serbest odak', endedAt: Date.now(),
+      }])
+    }
+    setSeconds(0)
+  }
+  function toggleFocusTimer() {
+    if (timerRunning) {
+      setTimerRunning(false)
+      if (timerPhase === 'focus') saveFocusSession()
+    } else {
+      if (timerPhase === 'breakReady') { setTimerPhase('break'); setSeconds(0) }
+      setTimerRunning(true)
+    }
+  }
+  function finishBreak() {
+    setTimerRunning(false)
+    setTimerPhase('focus')
+    setSeconds(0)
+    setToast('Mola bitirildi.')
+  }
+  function completeTask(id: number) {
+    setTasks((items) => items.map((item) => item.id === id ? { ...item, done: true, completedAt: Date.now() } : item))
+    if (timerRunning) saveFocusSession()
+    setTimerRunning(false)
+    setTimerPhase('focus')
+    setSeconds(0)
+    setPomodoroElapsed(0)
+    setToast('Görev tamamlandı.')
+  }
+  function snoozeTask(id: number) {
+    const task = tasks.find((item) => item.id === id)
+    if (!task) return
+    if (timerRunning && timerPhase === 'focus') saveFocusSession()
+    setTimerRunning(false)
+    setTimerPhase('focus')
+    setSeconds(0)
+    setPomodoroElapsed(0)
+    setUndoAction({ kind: 'snooze', task })
+    const nextTime = new Date(`${task.date ?? todayKey}T${task.time}:00`)
+    nextTime.setMinutes(nextTime.getMinutes() + 10)
+    setTasks((items) => items.map((item) => item.id === id ? { ...item, date: dateKey(nextTime), time: `${String(nextTime.getHours()).padStart(2, '0')}:${String(nextTime.getMinutes()).padStart(2, '0')}` } : item))
+    setToast('Görev 10 dakika ertelendi.')
+  }
+  function deleteTask(task: Task) {
+    if (timerRunning && nextTask?.id === task.id) {
+      if (timerPhase === 'focus') saveFocusSession()
+      setTimerRunning(false)
+      setTimerPhase('focus')
+      setSeconds(0)
+      setPomodoroElapsed(0)
+    }
+    setUndoAction({ kind: 'delete', task })
+    if (remindersOn && syncToken) void fetch(`${syncApiUrl}/api/tasks/${encodeURIComponent(String(task.id))}`, { method: 'DELETE', headers: { authorization: `Bearer ${syncToken}` } }).catch(() => undefined)
+    setTasks((items) => items.filter((item) => item.id !== task.id))
+    setToast('Görev silindi.')
+  }
+  function undoTaskChange() {
+    if (!undoAction) return
+    if (undoAction.kind === 'delete') setTasks((items) => [...items, undoAction.task])
+    else setTasks((items) => items.map((item) => item.id === undoAction.task.id ? undoAction.task : item))
+    setUndoAction(null)
+    setToast('Değişiklik geri alındı.')
+  }
+  function toggleHabit(id: number) {
+    setHabits((items) => items.map((habit) => {
+      if (habit.id !== id) return habit
+      const dates = habit.checkDates ?? []
+      const isChecked = dates.includes(todayKey)
+      const checkDates = isChecked ? dates.filter((date) => date !== todayKey) : [...dates, todayKey]
+      return { ...habit, checkDates, checked: !isChecked }
+    }))
+  }
+  function addHabit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const name = habitName.trim()
+    if (!name) return
+    const weeklyTarget = habitWeeklyTarget
+    setHabits((items) => [...items, { id: Date.now(), name, detail: `Haftada ${weeklyTarget} kez`, icon: 'spark', progress: 0, checked: false, weeklyTarget, checkDates: [] }])
+    setHabitName('')
+    setHabitModalOpen(false)
+    setToast('Alışkanlık eklendi.')
+  }
+  function handleTaskFormSubmit(event: React.FormEvent<HTMLFormElement>) {
+    if (plannerStep === 1) {
+      event.preventDefault()
+      if (taskName.trim()) setPlannerStep(2)
+      return
+    }
+    addTask(event)
   }
   function addTask(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const title = taskName.trim()
     if (!title) return
-    const formData = new FormData(event.currentTarget)
-    const time = String(formData.get('time') || '18:00')
-    const duration = Number(formData.get('duration') || 30)
-    setTasks((items) => [...items, { id: Date.now(), title, category: 'Kişisel', time, duration, done: false, color: 'violet', icon: 'target' }])
-    setTaskName('')
-    setModalOpen(false)
-    setToast('Görev planına eklendi')
+    const time = taskTime
+    const date = taskDate
+    const duration = taskDuration
+    const category = taskCategory
+    const priority = taskPriority
+    const energy = taskEnergy
+    const notes = taskNotes.trim()
+    const color = category === 'Sağlık' ? 'mint' : category === 'Hobiler' ? 'blue' : category === 'Kişisel' || category === 'Ev' ? 'peach' : 'violet'
+    const icon = category === 'Öğrenme' || category === 'İş/Okul' ? 'book' : category === 'Sağlık' ? 'flower' : 'target'
+    if (activeTab === 'Takvim') {
+      setSelectedDay(date)
+      setCalendarAnchor(date)
+    }
+    if (editingTask) {
+      setTasks((items) => items.map((item) => item.id === editingTask.id ? { ...item, title, category, time, date, duration, color, icon, priority, energy, notes } : item))
+      setToast('Görev güncellendi.')
+    } else {
+      setTasks((items) => [...items, { id: Date.now(), title, category, time, date, duration, done: false, color, icon, priority, energy, notes, createdAt: Date.now() }])
+      setToast('Görev planına eklendi.')
+    }
+    closeTaskModal()
   }
-  function requestNotifications() {
-    if (!('Notification' in window)) { setToast('Bu tarayıcı bildirimleri desteklemiyor'); return }
-    Notification.requestPermission().then((permission) => {
-      setRemindersOn(permission === 'granted')
-      setToast(permission === 'granted' ? 'Bildirim izni açıldı' : 'Bildirim izni verilmedi')
-    })
+  async function enableTaskReminders() {
+    if (!syncToken) { setSyncStatus('Önce Worker oturumunu aç.'); return }
+    if (!('Notification' in window) || !('serviceWorker' in navigator)) { setSyncStatus('Bu tarayıcı Web Push bildirimlerini desteklemiyor.'); return }
+    try {
+      const permission = await Notification.requestPermission()
+      if (permission !== 'granted') throw new Error('Bildirim izni verilmedi.')
+      const keyResponse = await fetch(`${syncApiUrl}/api/push/public-key`)
+      const keyResult = await keyResponse.json() as { publicKey?: string; error?: string }
+      if (!keyResponse.ok || !keyResult.publicKey) throw new Error(keyResult.error ?? 'Push anahtarı henüz yapılandırılmamış.')
+      const registration = await navigator.serviceWorker.ready
+      const applicationServerKey = fromBase64Url(keyResult.publicKey)
+      const subscription = await registration.pushManager.getSubscription() ?? await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey })
+      const response = await fetch(`${syncApiUrl}/api/push/subscribe`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${syncToken}` }, body: JSON.stringify(subscription.toJSON()) })
+      const result = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(result.error ?? 'Push aboneliği kaydedilemedi.')
+      setRemindersOn(true)
+      setSyncStatus('Hatırlatmalar etkin. Görev saati ve beş dakikalık tekrarlar sunucu tarafından gönderilir; teslimat OS/tarayıcıya bağlıdır.')
+    } catch (error) { setSyncStatus(error instanceof Error ? error.message : 'Hatırlatmalar etkinleştirilemedi.') }
+  }
+  async function saveReminderPreferences(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!syncToken) { setSyncStatus('Hatırlatma tercihlerini kaydetmek için Worker oturumu aç.'); return }
+    try {
+      const response = await fetch(`${syncApiUrl}/api/reminders/settings`, { method: 'PUT', headers: { 'content-type': 'application/json', authorization: `Bearer ${syncToken}` }, body: JSON.stringify({ quietStart, quietEnd, wording: reminderWording, privacyMode }) })
+      const result = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(result.error ?? 'Tercihler kaydedilemedi.')
+      if (remindersOn) setTasks((items) => items.slice())
+      setSyncStatus('Sessiz saat ve gizlilik tercihleri kaydedildi.')
+    } catch (error) { setSyncStatus(error instanceof Error ? error.message : 'Tercihler kaydedilemedi.') }
+  }
+  async function disableTaskReminders() {
+    try {
+      const registration = await navigator.serviceWorker.ready
+      const subscription = await registration.pushManager.getSubscription()
+      if (subscription && syncToken) await fetch(`${syncApiUrl}/api/push/subscribe`, { method: 'DELETE', headers: { 'content-type': 'application/json', authorization: `Bearer ${syncToken}` }, body: JSON.stringify({ endpoint: subscription.endpoint }) })
+      await subscription?.unsubscribe()
+      setRemindersOn(false)
+      setSyncStatus('Bu cihazdaki hatırlatmalar kapatıldı. Sunucu başka aboneliklere göndermeye devam edebilir.')
+    } catch { setSyncStatus('Hatırlatmalar kapatılamadı; bağlantıyı kontrol et.') }
+  }
+  async function copyQuickLink(action: string) {
+    const url = `${window.location.origin}/?action=${action}`
+    try { await navigator.clipboard.writeText(url); setSyncStatus(`Kısayol bağlantısı kopyalandı: ${url}`) }
+    catch { setSyncStatus(`Kısayol URL’si: ${url}`) }
+  }
+  function currentBackup(): BackupData {
+    return { format: 'violet-focus-backup-v1', tasks, habits, focusSessions, manualStudyLogs, learningGoals, customCategories, settings: { pomodoroKey, availableMinutes, recommendationEnergy } }
+  }
+  function restoreBackupData(backup: BackupData) {
+    setTasks(backup.tasks.map((task) => ({ ...task, date: task.date ?? todayKey })))
+    setHabits(backup.habits.map((habit) => { const checkDates = habit.checkDates ?? []; return { ...habit, checkDates, checked: checkDates.includes(todayKey) } }))
+    setFocusSessions(backup.focusSessions)
+    setManualStudyLogs(backup.manualStudyLogs)
+    setLearningGoals(backup.learningGoals)
+    setCustomCategories(backup.customCategories ?? [])
+    if (backup.settings?.pomodoroKey && pomodoroPresets.some((preset) => preset.key === backup.settings?.pomodoroKey)) setPomodoroKey(backup.settings.pomodoroKey)
+    if (backup.settings?.availableMinutes && [15,30,45,60].includes(backup.settings.availableMinutes)) setAvailableMinutes(backup.settings.availableMinutes)
+    if (backup.settings?.recommendationEnergy && ['light','steady','deep'].includes(backup.settings.recommendationEnergy)) setRecommendationEnergy(backup.settings.recommendationEnergy)
+    setFocusTaskId(null)
+  }
+  async function connectCloudSync(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    try {
+      const base = new URL(syncApiUrl.trim())
+      if (base.protocol !== 'https:') throw new Error('Eşitleme adresi HTTPS olmalı.')
+      setSyncApiUrl(base.origin)
+      const response = await fetch(`${base.origin}/api/auth/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: syncPassword }) })
+      const result = await response.json() as { token?: string; error?: string }
+      if (!response.ok || !result.token) throw new Error(result.error ?? 'Bağlantı kurulamadı.')
+      setSyncToken(result.token)
+      setSyncPassword('')
+      setSyncStatus('Güvenli oturum açıldı. Veriler henüz gönderilmedi.')
+    } catch (error) { setSyncStatus(error instanceof Error ? error.message : 'Bağlantı kurulamadı.') }
+  }
+  async function uploadEncryptedSync() {
+    if (!syncToken || syncPassphrase.length < 12) { setSyncStatus('Eşitleme parolası en az 12 karakter olmalı.'); return }
+    if (!window.confirm('Bu cihazdaki görev, alışkanlık, öğrenme ve odak verilerini şifreleyip buluttaki yedeğin yerine koyacaksın. Devam edilsin mi?')) return
+    try {
+      const salt = crypto.getRandomValues(new Uint8Array(16))
+      const iv = crypto.getRandomValues(new Uint8Array(12))
+      const key = await deriveSyncKey(syncPassphrase, salt)
+      const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(currentBackup())))
+      const response = await fetch(`${syncApiUrl}/api/sync`, { method: 'PUT', headers: { 'content-type': 'application/json', authorization: `Bearer ${syncToken}` }, body: JSON.stringify({ salt: toBase64Url(salt), iv: toBase64Url(iv), ciphertext: toBase64Url(new Uint8Array(ciphertext)) }) })
+      const result = await response.json() as { error?: string }
+      if (!response.ok) throw new Error(result.error ?? 'Buluta gönderilemedi.')
+      setSyncStatus('Şifreli yedek buluta gönderildi.')
+    } catch (error) { setSyncStatus(error instanceof Error ? error.message : 'Eşitleme başarısız oldu.') }
+  }
+  async function downloadEncryptedSync() {
+    if (!syncToken || syncPassphrase.length < 12) { setSyncStatus('Eşitleme parolası en az 12 karakter olmalı.'); return }
+    try {
+      const response = await fetch(`${syncApiUrl}/api/sync`, { headers: { authorization: `Bearer ${syncToken}` } })
+      const result = await response.json() as { vault: EncryptedVault | null; error?: string }
+      if (!response.ok) throw new Error(result.error ?? 'Bulut yedeği alınamadı.')
+      if (!result.vault) { setSyncStatus('Bulutta henüz yedek yok.'); return }
+      const key = await deriveSyncKey(syncPassphrase, fromBase64Url(result.vault.salt))
+      const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromBase64Url(result.vault.iv) }, key, fromBase64Url(result.vault.ciphertext))
+      const backup = parseBackup(JSON.parse(new TextDecoder().decode(plaintext)))
+      if (!window.confirm('Bu şifreli yedek mevcut bu-cihaz verilerinin yerini alacak. Devam edilsin mi?')) return
+      restoreBackupData(backup)
+      setSyncStatus('Şifreli yedek bu cihaza geri yüklendi.')
+    } catch (error) { setSyncStatus(error instanceof Error ? `Açılamadı: ${error.message}` : 'Bulut yedeği açılamadı.') }
+  }
+  function disconnectCloudSync() {
+    setSyncToken('')
+    setSyncPassphrase('')
+    setSyncStatus('Bu cihaz bulut oturumundan çıkarıldı; sunucudaki şifreli yedek korunuyor.')
+  }
+  function exportBackup() {
+    const backup = { format: 'violet-focus-backup-v1', exportedAt: new Date().toISOString(), tasks, habits, focusSessions, manualStudyLogs, learningGoals, customCategories, settings: { pomodoroKey, availableMinutes, recommendationEnergy } }
+    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `violet-focus-yedek-${todayKey}.json`
+    anchor.click()
+    URL.revokeObjectURL(url)
+    setToast('Yedek dosyası indirildi.')
+  }
+  async function importBackup(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    if (!file) return
+    try {
+      const backup = parseBackup(JSON.parse(await file.text()))
+      if (!window.confirm('Bu yedek mevcut görev, alışkanlık, öğrenme verileri ve özel kategorilerin yerini alacak. Devam edilsin mi?')) return
+      restoreBackupData(backup)
+      setToast('Yedek geri yüklendi.')
+    } catch (error) {
+      setToast(error instanceof Error ? `Yedek açılamadı: ${error.message}` : 'Yedek açılamadı.')
+    } finally {
+      event.target.value = ''
+    }
   }
 
   return (
@@ -96,10 +738,10 @@ function App() {
           {navItems.map(({ label, icon: Icon }) => <button key={label} className={`nav-item ${activeTab === label ? 'active' : ''}`} onClick={() => { setActiveTab(label); setMobileMenu(false) }}><Icon size={18} strokeWidth={1.9} /><span>{label}</span>{label === 'Şimdi' && <span className="nav-dot" />}</button>)}
         </nav>
         <div className="nav-label areas-label">ALANLARIN <button className="tiny-plus" onClick={() => setToast('Özel alanlar yakında eklenebilecek')} aria-label="Alan ekle"><Plus size={14} /></button></div>
-        <div className="area-list"><button><i className="area-dot dot-lavender" />Öğrenme<span>3</span></button><button><i className="area-dot dot-rose" />Sağlık<span>2</span></button><button><i className="area-dot dot-blue" />Hobiler<span>2</span></button><button><i className="area-dot dot-peach" />Kişisel<span>4</span></button></div>
+        <div className="area-list"><button><i className="area-dot dot-lavender" />Öğrenme<span>{tasks.filter((task) => task.category === 'Öğrenme').length}</span></button><button><i className="area-dot dot-rose" />Sağlık<span>{tasks.filter((task) => task.category === 'Sağlık').length}</span></button><button><i className="area-dot dot-blue" />Hobiler<span>{tasks.filter((task) => task.category === 'Hobiler').length}</span></button><button><i className="area-dot dot-peach" />Kişisel<span>{tasks.filter((task) => task.category === 'Kişisel').length}</span></button></div>
         <div className="sidebar-bottom">
           <div className="focus-card"><div className="focus-card-icon"><Zap size={16} fill="currentColor" /></div><div><b>Odak modun</b><p>Her seferinde tek adım.</p></div><span className="online-dot" /></div>
-          <button className="nav-item settings-item" onClick={() => setToast('Ayarlar yakında burada')}><Settings2 size={18} /><span>Ayarlar</span></button>
+          <button className="nav-item settings-item" onClick={() => setSettingsOpen(true)}><Settings2 size={18} /><span>Ayarlar</span></button>
           <div className="sidebar-foot"><span className="status-pip" /> Bugün kendin için buradasın</div>
         </div>
       </aside>
@@ -109,43 +751,53 @@ function App() {
         <header className="topbar">
           <button className="icon-button mobile-menu-button" onClick={() => setMobileMenu(true)} aria-label="Menüyü aç"><Menu size={20} /></button>
           <div className="breadcrumbs"><span>Alanım</span><ChevronRight size={14} /><b>{activeTab}</b></div>
-          <div className="top-actions"><div className="date-chip"><CalendarDays size={15} /><span>{dateLabel}</span></div><button className="icon-button search-btn" onClick={() => setToast('Arama yakında burada')} aria-label="Ara"><Search size={18} /></button><button className={`icon-button notification-btn ${remindersOn ? 'is-on' : ''}`} onClick={requestNotifications} aria-label="Bildirimleri aç"><Bell size={18} /><i /></button><div className="top-avatar">E</div></div>
+          <div className="top-actions"><div className="date-chip"><CalendarDays size={15} /><span>{dateLabel}</span></div><button className="icon-button search-btn" onClick={() => { setSearchOpen(true); setSearchQuery(''); setShowArchived(false) }} aria-label="Görevlerde ara"><Search size={18} /></button><button className={`icon-button notification-btn ${remindersOn ? 'permission-granted' : ''}`} onClick={() => setSettingsOpen(true)} aria-label="Hatırlatma ayarlarını aç" title={remindersOn ? 'Hatırlatmalar etkin' : 'Hatırlatmalar kapalı'}><Bell size={18} /><i /></button><div className="top-avatar">E</div></div>
         </header>
+        {hasExampleData && <div className="example-data-banner"><span className="example-badge"><Sparkles size={14} /></span><p><b>Başlangıç örnek verileri</b><span> Görev ve alışkanlık örnekleri analizlere dahil. Dilediğinde kaldırabilirsin.</span></p><button onClick={removeExampleData}>Örnekleri kaldır</button></div>}
 
         {activeTab === 'Şimdi' && <section className="page-content">
-          <div className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> PERŞEMBE, 29 EKİM <span className="eyebrow-spark">✦</span></div><h1>Merhaba, bugün <em>senin günün.</em></h1><p className="welcome-copy">Küçük adımlar, büyük değişimler. Şimdi bir sonraki adımına odaklan.</p></div><button className="add-task-button" onClick={() => setModalOpen(true)}><Plus size={17} /> Görev ekle</button></div>
+          <div className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> {dateUpper} <span className="eyebrow-spark">✦</span></div><h1>Şimdi ne <em>yapmalıyım?</em></h1><p className="welcome-copy">Sıradaki görevini ve bugünkü planını burada görebilirsin.</p></div><button className="add-task-button" onClick={openNewTaskModal}><Plus size={17} /> Görev ekle</button></div>
+
+          <div className="daily-snapshot" aria-label="Bugünün verileri">
+            <article className="snapshot-card snapshot-plan"><span className="snapshot-icon"><CalendarDays size={17} /></span><div><small>BUGÜNÜN PLANI</small><b>{todayTasks.length}<span> görev</span></b><p>{plannedMinutes} dk planlandı</p></div></article>
+            <article className="snapshot-card snapshot-done"><span className="snapshot-icon"><CheckCheck size={17} /></span><div><small>TAMAMLAMA</small><b>{doneCount}<span> / {todayTasks.length}</span></b><p>{progress}% gün ilerlemesi</p></div><i style={{ width: `${progress}%` }} /></article>
+            <article className="snapshot-card snapshot-focus"><span className="snapshot-icon"><Clock3 size={17} /></span><div><small>ODAK SÜRESİ</small><b>{formatDuration(focusTodaySeconds)}</b><p>{formatDuration(learningTodaySeconds)} öğrenme</p></div></article>
+            <article className="snapshot-card snapshot-habits"><span className="snapshot-icon"><Flower2 size={17} /></span><div><small>RUTİNLER</small><b>{checkedHabitsToday}<span> / {habits.length}</span></b><p>{habitProgress}% bugünkü hedef</p></div></article>
+          </div>
 
           <div className="dashboard-grid">
             <div className="main-column">
-              <section className="focus-panel">
+              <section className="focus-panel" id="focus-panel">
                 <div className="focus-panel-glow" />
-                <div className="focus-panel-top"><div className="live-label"><span className="pulse-dot" /> ŞİMDİ ODAKLAN</div><button className="focus-more" aria-label="Diğer seçenekler"><MoreHorizontal size={20} /></button></div>
+                <div className="focus-panel-top"><div className="live-label"><span className="pulse-dot" /> ŞİMDİ ODAKLAN</div><button className="focus-more" onClick={() => nextTask && openTaskEditor(nextTask)} disabled={!nextTask || timerRunning} aria-label="Sıradaki görevi düzenle"><Pencil size={16} /></button></div>
                 {nextTask ? <>
-                  <div className="task-category"><span className={`category-glyph glyph-${nextTask.color}`}>{nextTask.icon === 'book' ? <BookOpen size={14} /> : nextTask.icon === 'flower' ? <Flower2 size={14} /> : <Target size={14} />}</span>{nextTask.category}<span className="category-divider">/</span><span className="task-due">Sıradaki görev</span></div>
+                  <div className="task-category"><span className={`category-glyph glyph-${nextTask.color}`}>{nextTask.icon === 'book' ? <BookOpen size={14} /> : nextTask.icon === 'flower' ? <Flower2 size={14} /> : <Target size={14} />}</span>{nextTask.category}<span className="category-divider">/</span><span className="task-due">{selectedFocusTask ? 'Odak seçimin' : 'Sıradaki görev'}</span><span className={`priority-chip priority-${nextTask.priority ?? 'normal'}`}>{nextTask.priority === 'high' ? 'Öncelikli' : nextTask.priority === 'low' ? 'Esnek' : 'Normal'}</span></div>
                   <h2>{nextTask.title}</h2>
-                  <div className="task-meta"><span><Clock3 size={15} /> {nextTask.time} <span className="meta-separator">·</span> {nextTask.duration} dakika</span><span className="meta-divider" /><span className="soft-pill"><Sparkles size={13} /> Tek bir şeye odaklan</span></div>
-                  <div className="focus-actions"><button className="start-button" onClick={() => setTimerRunning((value) => !value)}>{timerRunning ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}{timerRunning ? 'Duraklat' : 'Odaklanmaya başla'}</button><button className="complete-button" onClick={() => completeTask(nextTask.id)}><Check size={17} /> Tamamlandı</button><button className="snooze-button" onClick={() => setToast('Görev 10 dakika ertelendi')}><AlarmClock size={16} /> Ertele</button></div>
-                  {timerRunning && <div className="timer-running"><span className="timer-live" /> Odak oturumu açık <b>{timerLabel}</b></div>}
-                </> : <div className="all-done"><div className="all-done-icon"><CheckCheck size={25} /></div><h2>Bugünlük bu kadar! ✨</h2><p>Planındaki görevlerin hepsi tamamlandı. Kendinle gurur duy.</p><button onClick={() => setModalOpen(true)} className="complete-button"><Plus size={16} /> Yeni görev ekle</button></div>}
+                  <div className="task-meta"><span><Clock3 size={15} /> {nextTask.time} <span className="meta-separator">·</span> {nextTask.duration} dakika</span><span className="meta-divider" /><span className="soft-pill"><Zap size={13} /> {nextTask.energy === 'deep' ? 'Derin odak' : nextTask.energy === 'light' ? 'Hafif efor' : 'Dengeli efor'}</span></div>
+                  <div className="focus-actions">{timerPhase === 'breakReady' ? <><button className="start-button" onClick={toggleFocusTimer}><Play size={16} fill="currentColor" /> {pomodoro.rest} dk molaya başla</button><button className="complete-button" onClick={finishBreak}>Mola yapmayacağım</button></> : timerPhase === 'break' ? <><button className="start-button" onClick={toggleFocusTimer}>{timerRunning ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}{timerRunning ? 'Molayı duraklat' : 'Molaya devam et'}</button><button className="complete-button" onClick={finishBreak}>Molayı bitir</button></> : <><button className="start-button" onClick={toggleFocusTimer}>{timerRunning ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" />}{timerRunning ? 'Duraklat' : seconds > 0 || pomodoroElapsed > 0 ? 'Devam et' : `${pomodoro.focus} dk odaklan`}</button><button className="complete-button" onClick={() => completeTask(nextTask.id)}><Check size={17} /> Tamamlandı</button><button className="snooze-button" onClick={() => snoozeTask(nextTask.id)}><AlarmClock size={16} /> Ertele</button></>}</div>
+                  {(timerRunning || seconds > 0 || pomodoroElapsed > 0 || timerPhase === 'breakReady') && <div className={`timer-running timer-${timerPhase}`}><span className="timer-live" /> {timerPhase === 'break' ? 'Mola' : timerPhase === 'breakReady' ? 'Mola hazır' : `Pomodoro · ${pomodoro.focus} dk`} <b>{timerLabel}</b></div>}
+                  {!timerRunning && timerPhase === 'focus' && seconds === 0 && pomodoroElapsed === 0 && <div className="pomodoro-picker"><span>Odak döngüsü</span>{pomodoroPresets.map((preset) => <button type="button" key={preset.key} className={pomodoroKey === preset.key ? 'selected' : ''} aria-pressed={pomodoroKey === preset.key} onClick={() => setPomodoroKey(preset.key)}><b>{preset.focus}/{preset.rest}</b><small>dk</small></button>)}</div>}
+                </> : <div className="all-done"><div className="all-done-icon"><CheckCheck size={25} /></div><h2>Bugün için planlanan görev kalmadı.</h2><p>İstersen gününü burada bitirebilir veya yeni bir görev ekleyebilirsin.</p><button onClick={openNewTaskModal} className="complete-button"><Plus size={16} /> Yeni görev ekle</button></div>}
                 <div className="focus-panel-footer"><span><Sparkles size={14} /> İlerleme, mükemmellikten daha önemli.</span><span className="panel-index">01 <i /> 04</span></div>
               </section>
 
               <section className="schedule-section">
-                <div className="section-heading"><div><span className="section-kicker">BUGÜNÜN AKIŞI</span><h3>Günün planı <span className="heading-count">{tasks.length} görev</span></h3></div><button className="text-button" onClick={() => setActiveTab('Takvim')}>Tüm takvim <ArrowRight size={15} /></button></div>
+                <div className="section-heading"><div><span className="section-kicker">BUGÜNÜN AKIŞI</span><h3>Günün planı <span className="heading-count">{todayTasks.length} görev</span></h3></div><button className="text-button" onClick={() => setActiveTab('Takvim')}>Tüm takvim <ArrowRight size={15} /></button></div>
                 <div className="timeline-list">
-                  {tasks.slice(0, 4).map((task, index) => <div className={`timeline-row ${task.done ? 'is-done' : ''}`} key={task.id}>
-                    <div className="timeline-time">{task.time}</div><div className="timeline-track"><span className={`timeline-node ${task.done ? 'node-done' : index === 0 ? 'node-active' : ''}`}>{task.done ? <Check size={11} /> : null}</span>{index !== Math.min(tasks.length, 4) - 1 && <i className="timeline-line" />}</div>
+                  {todayTasks.slice(0, 4).map((task, index) => <div className={`timeline-row ${task.done ? 'is-done' : ''}`} key={task.id}>
+                    <div className="timeline-time">{task.time}</div><div className="timeline-track"><span className={`timeline-node ${task.done ? 'node-done' : index === 0 ? 'node-active' : ''}`}>{task.done ? <Check size={11} /> : null}</span>{index !== Math.min(todayTasks.length, 4) - 1 && <i className="timeline-line" />}</div>
                     <div className={`timeline-task task-${task.color}`}><div className="timeline-task-main"><span className="timeline-task-icon">{task.icon === 'book' ? <BookOpen size={15} /> : task.icon === 'flower' ? <Flower2 size={15} /> : <Target size={15} />}</span><div><b>{task.title}</b><small>{task.category} <span>·</span> {task.duration} dk</small></div></div><span className={`task-state ${task.done ? 'state-done' : ''}`}>{task.done ? 'Tamamlandı' : index === 0 ? 'Sıradaki' : 'Planlandı'}</span></div>
                   </div>)}
                 </div>
-                <button className="add-inline" onClick={() => setModalOpen(true)}><Plus size={15} /> Gününe bir görev daha ekle</button>
+                <button className="add-inline" onClick={openNewTaskModal}><Plus size={15} /> Gününe bir görev daha ekle</button>
               </section>
+              <section className="smart-recommendations"><div className="recommendation-header"><span className="recommendation-art"><Sparkles size={18} /></span><div><span className="section-kicker">HIZLI SEÇİM</span><h3>Zamanına ve enerjine uygun bir görev</h3><p>Öneri seçmek takvimini değiştirmez; yalnızca odak kartını günceller.</p></div></div><div className="recommendation-controls"><div className="recommendation-control"><span>Ne kadar zamanın var?</span><div>{[15,30,45,60].map((minutes) => <button type="button" key={minutes} className={availableMinutes === minutes ? 'selected' : ''} aria-pressed={availableMinutes === minutes} onClick={() => setAvailableMinutes(minutes)}>{minutes} dk</button>)}</div></div><div className="recommendation-control"><span>Enerji düzeyin</span><div>{energyChoices.map(({ value, label }) => <button type="button" key={value} className={recommendationEnergy === value ? 'selected' : ''} aria-pressed={recommendationEnergy === value} onClick={() => setRecommendationEnergy(value)}>{label}</button>)}</div></div></div><div className="recommendation-results">{recommendedTasks.length ? recommendedTasks.map((task) => <article className="recommendation-task" key={task.id}><span className={`recommendation-task-icon tone-${availableCategories.find((item) => item.label === task.category)?.tone ?? 'lilac'}`}>{(() => { const Icon = availableCategories.find((item) => item.label === task.category)?.icon ?? Focus; return <Icon size={17} /> })()}</span><div><small>{task.category} · {task.duration} dk{task.priority === 'high' ? ' · Öncelikli' : ''}</small><b>{task.title}</b></div><button type="button" disabled={timerRunning} title={timerRunning ? 'Odak oturumu sürerken görev değiştirilemez.' : undefined} onClick={() => { setFocusTaskId(task.id); document.getElementById('focus-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }}>Seç <ArrowRight size={14} /></button></article>) : <div className="recommendation-empty"><span><Clock3 size={17} /></span><p>Bu süre ve enerji seçimine uyan bugünkü görev yok. Filtreyi değiştirebilir veya kendin görev ekleyebilirsin.</p></div>}</div></section>
             </div>
 
             <aside className="right-column">
-              <section className="progress-card"><div className="section-heading compact"><div><span className="section-kicker">İSTİKRAR KAZANIYOR</span><h3>Günün ilerlemesi</h3></div><button className="more-round" aria-label="Daha fazla"><MoreHorizontal size={18} /></button></div><div className="progress-body"><div className="ring-wrap"><svg viewBox="0 0 120 120" className="progress-ring" aria-label={`${progress} yüzde tamamlandı`}><circle className="ring-track" cx="60" cy="60" r="49" /><circle className="ring-fill" cx="60" cy="60" r="49" style={{ strokeDashoffset: `${307.9 - (307.9 * progress / 100)}` }} /></svg><div className="ring-center"><b>{progress}%</b><span>tamamlandı</span></div></div><div className="progress-stats"><div><span className="stat-dot dot-violet" /><span>Tamamlandı</span><b>{doneCount}</b></div><div><span className="stat-dot dot-light" /><span>Kalan</span><b>{tasks.length - doneCount}</b></div><div><span className="stat-dot dot-peach" /><span>Odak süresi</span><b>1s 20d</b></div></div></div><div className="progress-bottom"><span>Harika gidiyorsun!</span><span className="mini-sparkles">✦ ✦ ✦</span></div></section>
+              <section className="progress-card"><div className="section-heading compact"><div><span className="section-kicker">İSTİKRAR KAZANIYOR</span><h3>Günün ilerlemesi</h3></div><button className="more-round" aria-label="Daha fazla"><MoreHorizontal size={18} /></button></div><div className="progress-body"><div className="ring-wrap"><svg viewBox="0 0 120 120" className="progress-ring" aria-label={`${progress} yüzde tamamlandı`}><circle className="ring-track" cx="60" cy="60" r="49" /><circle className="ring-fill" cx="60" cy="60" r="49" style={{ strokeDashoffset: `${307.9 - (307.9 * progress / 100)}` }} /></svg><div className="ring-center"><b>{progress}%</b><span>tamamlandı</span></div></div><div className="progress-stats"><div><span className="stat-dot dot-violet" /><span>Tamamlandı</span><b>{doneCount}</b></div><div><span className="stat-dot dot-light" /><span>Kalan</span><b>{todayTasks.length - doneCount}</b></div><div><span className="stat-dot dot-peach" /><span>Odak süresi</span><b>{formatDuration(focusTodaySeconds)}</b></div></div></div><div className="progress-bottom"><span>Bugünkü ilerlemen</span><span className="mini-sparkles">✦ ✦ ✦</span></div></section>
 
-              <section className="habit-card"><div className="section-heading compact"><div><span className="section-kicker">KÜÇÜK RİTÜELLER</span><h3>Alışkanlıkların</h3></div><button className="arrow-round" onClick={() => setActiveTab('Alışkanlıklar')} aria-label="Alışkanlıklara git"><ArrowRight size={16} /></button></div><div className="habit-list">{habits.slice(0, 3).map((habit) => <div className="habit-row" key={habit.id}><div className={`habit-icon habit-${habit.icon}`}>{habit.icon === 'book' ? <BookOpen size={16} /> : habit.icon === 'spark' ? <Sparkles size={16} /> : <span className="water-drop">●</span>}</div><div className="habit-info"><b>{habit.name}</b><small>{habit.detail}</small><div className="habit-progress"><i style={{ width: `${habit.progress}%` }} /></div></div><button className={`habit-check ${habit.checked ? 'checked' : ''}`} onClick={() => setHabits((list) => list.map((item) => item.id === habit.id ? { ...item, checked: !item.checked, progress: item.checked ? Math.max(0, item.progress - 25) : Math.min(100, item.progress + 25) } : item))} aria-label={`${habit.name} alışkanlığını işaretle`}>{habit.checked ? <Check size={14} /> : null}</button></div>)}</div><button className="text-button habit-view" onClick={() => setActiveTab('Alışkanlıklar')}>Tüm alışkanlıklar <ArrowRight size={14} /></button></section>
+              <section className="habit-card"><div className="section-heading compact"><div><span className="section-kicker">KÜÇÜK RİTÜELLER</span><h3>Alışkanlıkların</h3></div><button className="arrow-round" onClick={() => setActiveTab('Alışkanlıklar')} aria-label="Alışkanlıklara git"><ArrowRight size={16} /></button></div><div className="habit-list">{habits.slice(0, 3).map((habit) => <div className="habit-row" key={habit.id}><div className={`habit-icon habit-${habit.icon}`}>{habit.icon === 'book' ? <BookOpen size={16} /> : habit.icon === 'spark' ? <Sparkles size={16} /> : <span className="water-drop">●</span>}</div><div className="habit-info"><b>{habit.name}</b><small>{habit.detail}</small><div className="habit-progress"><i style={{ width: `${habit.progress}%` }} /></div></div><button className={`habit-check ${habit.checked ? 'checked' : ''}`} onClick={() => toggleHabit(habit.id)} aria-label={`${habit.name} alışkanlığını işaretle`}>{habit.checked ? <Check size={14} /> : null}</button></div>)}</div><button className="text-button habit-view" onClick={() => setActiveTab('Alışkanlıklar')}>Tüm alışkanlıklar <ArrowRight size={14} /></button></section>
 
               <section className="quote-card"><div className="quote-mark">“</div><p>Biraz ilerlemek,<br /><b>hiç başlamamaktan iyidir.</b></p><div className="quote-bottom"><span>BUGÜNÜN NOTU</span><div><i /><i /><i /></div></div></section>
             </aside>
@@ -153,17 +805,56 @@ function App() {
           <footer className="page-footer"><span>Violet Focus <i>·</i> Kendine verdiğin sözü tut.</span><button onClick={() => setToast('Geri bildirim yakında!')}><CircleHelp size={14} /> Yardım & geri bildirim</button></footer>
         </section>}
 
-        {activeTab === 'Takvim' && <section className="page-content secondary-page"><div className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> ZAMANINI SAHİPLEN</div><h1>Takvimin, <em>senin ritmin.</em></h1><p className="welcome-copy">Planını gör, boşluklarını fark et, gününe yer aç.</p></div><button className="add-task-button" onClick={() => setModalOpen(true)}><Plus size={17} /> Görev ekle</button></div><div className="calendar-toolbar"><button className="calendar-month"><ChevronLeft size={18} /><b>Ekim 2026</b><ChevronRight size={18} /></button><div className="calendar-mode"><button className="selected">Hafta</button><button onClick={() => setToast('Ay görünümü yakında')}>Ay</button></div></div><div className="week-strip">{week.map((day, index) => <button className={`week-day ${day === selectedDay ? 'selected' : ''}`} key={day} onClick={() => setSelectedDay(day)}><span>{day}</span><b>{26 + index}</b><i className={index < 5 ? 'has-events' : ''} /></button>)}</div><div className="calendar-layout"><div className="day-agenda"><div className="agenda-heading"><div><span className="section-kicker">29 EKİM, PERŞEMBE</span><h3>Günün akışı</h3></div><span className="agenda-total">{tasks.length} planlı görev</span></div>{['09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00'].map((hour, i) => <div className="agenda-hour" key={hour}><span>{hour}</span><div className="hour-line">{tasks[i] && <div className={`agenda-event event-${tasks[i].color}`}><b>{tasks[i].title}</b><small>{tasks[i].duration} dakika · {tasks[i].category}</small></div>}</div></div>)}</div><aside className="calendar-side"><div className="side-note"><span className="section-kicker">GÜNÜN ÖZETİ</span><div className="side-note-number">{tasks.length}<small> görev</small></div><p>Bir plan, esneklik için de yer bırakır.</p><div className="side-note-bottom"><Clock3 size={15} /> 2 saat 40 dk planlı</div></div><div className="glass-note"><Sparkles size={17} /><p><b>Bir boşluk fark ettin mi?</b><br />Hedeflerinden birini uygun zamana yerleştirmeyi deneyebilirsin.</p><button onClick={() => setToast('Akıllı plan önerileri yakında')}>Plan önerisi al <ArrowRight size={14} /></button></div></aside></div></section>}
+        {activeTab === 'Takvim' && <section className="page-content secondary-page"><div className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> ZAMANINI SAHİPLEN</div><h1>Takvimin, <em>senin ritmin.</em></h1><p className="welcome-copy">Planını gör, boşluklarını fark et, gününe yer aç.</p></div><button className="add-task-button" onClick={openNewTaskModal}><Plus size={17} /> Görev ekle</button></div><div className="calendar-toolbar"><div className="calendar-month"><button className="calendar-nav" onClick={() => shiftCalendarWeek(-1)} aria-label="Önceki hafta"><ChevronLeft size={18} /></button><b>{new Intl.DateTimeFormat('tr-TR', { month: 'long', year: 'numeric' }).format(selectedCalendarDate)}</b><button className="calendar-nav" onClick={() => shiftCalendarWeek(1)} aria-label="Sonraki hafta"><ChevronRight size={18} /></button></div><div className="calendar-mode"><button className="selected">Hafta</button><button onClick={() => setToast('Ay görünümü yakında')}>Ay</button></div></div><div className="week-strip">{calendarWeek.map((day) => <button className={`week-day ${dateKey(day) === selectedDay ? 'selected' : ''} ${moveSelectionTaskId !== null ? 'move-target' : ''}`} key={dateKey(day)} onClick={() => { if (moveSelectionTaskId !== null) requestTaskMove(moveSelectionTaskId, dateKey(day)); else { setSelectedDay(dateKey(day)); setCalendarAnchor(dateKey(day)) } }} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'move' }} onDrop={(event) => { event.preventDefault(); event.stopPropagation(); const id = Number(event.dataTransfer.getData('text/plain')) || draggingTaskId; if (id) requestTaskMove(id, dateKey(day)); setDraggingTaskId(null) }}><span>{new Intl.DateTimeFormat('tr-TR', { weekday: 'short' }).format(day).replace('.', '')}</span><b>{day.getDate()}</b><i className={tasks.some((task) => !task.archived && (task.date ?? todayKey) === dateKey(day)) ? 'has-events' : ''} /></button>)}</div>{moveSelectionTaskId !== null && <div className="calendar-move-hint"><CalendarDays size={15} /> Taşımak istediğin görevin yeni gününü yukarıdan seç. Plan, onayından önce değişmez.<button onClick={() => setMoveSelectionTaskId(null)}>Vazgeç</button></div>}<div className="calendar-layout"><div className="day-agenda"><div className="agenda-heading"><div><span className="section-kicker">{selectedCalendarLabel}</span><h3>Günün akışı</h3></div><span className="agenda-total">{selectedTasks.length} planlı görev</span></div>{selectedTasks.length ? selectedTasks.map((task) => <div className="agenda-hour" key={task.id}><span>{task.time}</span><div className="hour-line"><div className={`agenda-event event-${task.color} ${draggingTaskId === task.id ? 'is-dragging' : ''}`} draggable onDragStart={(event) => { event.dataTransfer.setData('text/plain', String(task.id)); event.dataTransfer.effectAllowed = 'move'; setDraggingTaskId(task.id) }} onDragEnd={() => setDraggingTaskId(null)}><div className="agenda-event-copy"><b>{task.title}</b><small>{task.duration} dakika · {task.category}{task.priority === 'high' ? ' · Öncelikli' : ''}{task.done ? ' · Tamamlandı' : ''}</small>{task.notes && <em>{task.notes}</em>}</div><div className="agenda-event-actions"><button onClick={() => openTaskEditor(task)} aria-label={`${task.title} görevini düzenle`} title="Düzenle"><Pencil size={14} /></button><button onClick={() => { setMoveSelectionTaskId(task.id); setToast('Taşınacak günü haftalık şeritten seç.') }} aria-label={`${task.title} görevini başka güne taşı`} title="Başka güne taşı"><CalendarDays size={14} /></button><button onClick={() => deleteTask(task)} aria-label={`${task.title} görevini sil`} title="Sil"><Trash2 size={14} /></button></div></div></div></div>) : <div className="empty-agenda"><CalendarDays size={22} /><b>Bu gün için plan yok</b><span>İstersen boşluğu kendine ayır ya da görev ekle.</span></div>}</div><aside className="calendar-side"><div className="side-note"><span className="section-kicker">GÜNÜN ÖZETİ</span><div className="side-note-number">{selectedTasks.length}<small> görev</small></div><p>Bir plan, esneklik için de yer bırakır.</p><div className="side-note-bottom"><Clock3 size={15} /> {selectedPlannedMinutes} dk planlandı</div></div><div className="glass-note"><Sparkles size={17} /><p><b>Bir boşluk fark ettin mi?</b><br />Hedeflerinden birini uygun zamana yerleştirmeyi deneyebilirsin.</p><button onClick={() => setToast('Akıllı plan önerileri yakında')}>Plan önerisi al <ArrowRight size={14} /></button></div></aside></div></section>}
 
-        {activeTab === 'Alışkanlıklar' && <section className="page-content secondary-page"><div className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> HER GÜN BİRAZ DAHA</div><h1>Küçük ritüeller, <em>büyük farklar.</em></h1><p className="welcome-copy">İstikrar, kendine verdiğin sözleri tutmakla başlar.</p></div><button className="add-task-button" onClick={() => setToast('Alışkanlık ekleme formu yakında')}><Plus size={17} /> Alışkanlık ekle</button></div><div className="stats-row"><div className="stat-tile"><span className="tile-icon lavender"><Flame size={18} /></span><div><small>EN UZUN SERİ</small><b>12 gün</b><span>Kitap okuma</span></div></div><div className="stat-tile"><span className="tile-icon mint"><Target size={18} /></span><div><small>BU HAFTA</small><b>76%</b><span>Hedef tutarlılığı</span></div></div><div className="stat-tile"><span className="tile-icon peach"><CheckCheck size={18} /></span><div><small>TAMAMLANAN</small><b>18</b><span>ritüel bu hafta</span></div></div></div><div className="habits-layout"><section className="habits-main-card"><div className="section-heading"><div><span className="section-kicker">BUGÜN, 29 EKİM</span><h3>Bugünkü ritüellerin</h3></div><button className="soft-select">Bu hafta <ChevronDown size={14} /></button></div>{habits.map((habit) => <div className="habit-detail-row" key={habit.id}><div className={`habit-icon habit-${habit.icon}`}>{habit.icon === 'book' ? <BookOpen size={17} /> : habit.icon === 'spark' ? <Sparkles size={17} /> : <span className="water-drop">●</span>}</div><div className="habit-detail-copy"><b>{habit.name}</b><span>{habit.detail}</span><div className="habit-progress wide"><i style={{ width: `${habit.progress}%` }} /></div></div><span className="habit-percent">{habit.progress}%</span><button className={`habit-check large ${habit.checked ? 'checked' : ''}`} onClick={() => setHabits((list) => list.map((item) => item.id === habit.id ? { ...item, checked: !item.checked, progress: item.checked ? Math.max(0, item.progress - 25) : Math.min(100, item.progress + 25) } : item))} aria-label="Alışkanlığı tamamla">{habit.checked && <Check size={15} />}</button></div>)}</section><section className="consistency-card"><div className="section-heading compact"><div><span className="section-kicker">SON 4 HAFTA</span><h3>Devamlılık haritan</h3></div><button className="more-round"><MoreHorizontal size={18} /></button></div><div className="heatmap-labels"><span>HAZ 1</span><span>HAZ 2</span><span>HAZ 3</span><span>HAZ 4</span></div><div className="heatmap-grid">{Array.from({ length: 28 }, (_, i) => <i className={`heat-cell heat-${(i * 7 + 3) % 5}`} key={i} />)}</div><div className="heatmap-legend"><span>Daha az</span><i className="heat-cell heat-0" /><i className="heat-cell heat-1" /><i className="heat-cell heat-3" /><i className="heat-cell heat-4" /><span>Daha çok</span></div><div className="consistency-footer"><span><span className="tiny-green-dot" /> En tutarlı günün</span><b>Perşembe</b></div></section></div></section>}
+        {activeTab === 'Alışkanlıklar' && <section className="page-content secondary-page"><div className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> HER GÜN BİRAZ DAHA</div><h1>Küçük ritüeller, <em>büyük farklar.</em></h1><p className="welcome-copy">İstikrar, kendine verdiğin sözleri tutmakla başlar.</p></div><button className="add-task-button" onClick={openHabitModal}><Plus size={17} /> Alışkanlık ekle</button></div><div className="stats-row"><div className="stat-tile"><span className="tile-icon lavender"><Flame size={18} /></span><div><small>EN UZUN SERİ</small><b>{longestHabitDays} gün</b><span>kaydedilen en uzun seri</span></div></div><div className="stat-tile"><span className="tile-icon mint"><Target size={18} /></span><div><small>BU HAFTA</small><b>{weeklyHabitProgress}%</b><span>haftalık hedef tutarlılığı</span></div></div><div className="stat-tile"><span className="tile-icon peach"><CheckCheck size={18} /></span><div><small>TAMAMLANAN</small><b>{weeklyHabitChecks}</b><span>işaret bu hafta</span></div></div></div><div className="habits-layout"><section className="habits-main-card"><div className="section-heading"><div><span className="section-kicker">BUGÜN, {new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'long' }).format(now).toLocaleUpperCase('tr-TR')}</span><h3>Bugünkü ritüellerin</h3></div><button className="soft-select">Bu hafta <ChevronDown size={14} /></button></div>{habits.map((habit) => <div className="habit-detail-row" key={habit.id}><div className={`habit-icon habit-${habit.icon}`}>{habit.icon === 'book' ? <BookOpen size={17} /> : habit.icon === 'spark' ? <Sparkles size={17} /> : <span className="water-drop">●</span>}</div><div className="habit-detail-copy"><b>{habit.name}</b><span>{habit.detail}</span><div className="habit-progress wide"><i style={{ width: `${habit.progress}%` }} /></div></div><span className="habit-percent">{habit.progress}%</span><button className={`habit-check large ${habit.checked ? 'checked' : ''}`} onClick={() => toggleHabit(habit.id)} aria-label="Alışkanlığı tamamla">{habit.checked && <Check size={15} />}</button></div>)}</section><section className="consistency-card"><div className="section-heading compact"><div><span className="section-kicker">SON 4 HAFTA</span><h3>Devamlılık haritan</h3></div><button className="more-round"><MoreHorizontal size={18} /></button></div><div className="heatmap-labels">{habitHeatmapDays.filter((_, index) => index % 7 === 0).map((day) => <span key={day.key}>{new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' }).format(new Date(`${day.key}T00:00:00`)).toLocaleUpperCase('tr-TR')}</span>)}</div><div className="heatmap-grid">{habitHeatmapDays.map((day) => <i className={`heat-cell heat-${Math.min(day.count, 4)}`} title={`${day.key}: ${day.count} alışkanlık`} key={day.key} />)}</div><div className="heatmap-legend"><span>Daha az</span><i className="heat-cell heat-0" /><i className="heat-cell heat-1" /><i className="heat-cell heat-3" /><i className="heat-cell heat-4" /><span>Daha çok</span></div><div className="consistency-footer"><span><span className="tiny-green-dot" /> Bu hafta kaydedilen</span><b>{weeklyHabitChecks} işaret</b></div></section></div></section>}
 
-        {activeTab === 'Öğrenme' && <section className="page-content secondary-page"><div className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> MERAKINI CANLI TUT</div><h1>Her gün biraz daha <em>öğren.</em></h1><p className="welcome-copy">Büyük hedefler, küçük ve düzenli çalışma adımlarıyla gerçekleşir.</p></div><button className="add-task-button" onClick={() => setToast('Öğrenme hedefi ekleme formu yakında')}><Plus size={17} /> Hedef ekle</button></div><div className="learning-summary"><div className="learning-summary-copy"><span className="section-kicker">BU HAFTAKİ ODAĞIN</span><h3>4 saat 25 dakika <span>öğrenmeye ayrıldı</span></h3><p>Geçen haftaya göre <b><ArrowUpRight size={14} /> %18 daha fazla</b></p></div><div className="study-bars">{[30,54,42,86,60,35,18].map((height, i) => <div className="study-bar-column" key={i}><i style={{ height: `${height}%` }} className={i === 3 ? 'bar-today' : ''} /><small>{week[i]}</small></div>)}</div></div><div className="learning-section-head"><div><span className="section-kicker">YOLCULUKLARIN</span><h3>Aktif öğrenme hedefleri</h3></div><button className="soft-select">Tümü <ChevronDown size={14} /></button></div><div className="course-grid"><article className="course-card course-purple"><div className="course-card-top"><span className="course-icon"><BookOpen size={19} /></span><button className="more-round"><MoreHorizontal size={18} /></button></div><span className="course-tag">DİL · İNGİLİZCE</span><h3>İngilizceyi akıcı<br />konuşmak</h3><p>Dinleme pratiği ve günlük kelimelerle adım adım ilerle.</p><div className="course-progress-label"><span>İlerleme</span><b>5 / 12 adım</b></div><div className="course-progress"><i style={{ width: '42%' }} /></div><div className="course-footer"><span><Clock3 size={14} /> 2sa 10dk çalışıldı</span><button onClick={() => setToast('İngilizce çalışma oturumu açıldı')}><Play size={14} fill="currentColor" /> Devam et</button></div></article><article className="course-card course-peach"><div className="course-card-top"><span className="course-icon"><Flower2 size={19} /></span><button className="more-round"><MoreHorizontal size={18} /></button></div><span className="course-tag">YARATICILIK · HOBİ</span><h3>Sulu boya<br />temelleri</h3><p>Renkleri keşfet, fırçanı eline al ve kendi tarzını bul.</p><div className="course-progress-label"><span>İlerleme</span><b>3 / 8 adım</b></div><div className="course-progress"><i style={{ width: '38%' }} /></div><div className="course-footer"><span><Clock3 size={14} /> 1sa 35dk çalışıldı</span><button onClick={() => setToast('Sulu boya çalışma oturumu açıldı')}><Play size={14} fill="currentColor" /> Devam et</button></div></article><button className="add-course-card" onClick={() => setToast('Yeni öğrenme hedefi yakında')}><span><Plus size={19} /></span><b>Yeni bir yolculuk başlat</b><small>Öğrenmek istediğin şeyi ekle</small></button></div><div className="study-log"><div className="section-heading"><div><span className="section-kicker">SON OTURUMLAR</span><h3>Çalışma günlüğün</h3></div><button className="text-button" onClick={() => setToast('Tüm oturumlar yakında')}>Tümünü gör <ArrowRight size={14} /></button></div><div className="log-row"><div className="log-icon"><BookOpen size={16} /></div><div><b>İngilizce · Listening pratiği</b><small>Bugün, 09:15</small></div><strong>35 dk</strong><Check size={16} className="log-check" /></div><div className="log-row"><div className="log-icon peach-log"><Flower2 size={16} /></div><div><b>Sulu boya · Renk çalışması</b><small>Dün, 18:40</small></div><strong>45 dk</strong><Check size={16} className="log-check" /></div></div></section>}
+        {activeTab === 'Öğrenme' && <section className="page-content secondary-page">
+          <div className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> MERAKINI CANLI TUT</div><h1>Her gün biraz daha <em>öğren.</em></h1><p className="welcome-copy">Zamanını kaydet, hedeflerini küçük adımlara böl.</p></div><div className="learning-actions"><button className="secondary-action-button" onClick={openStudyLogModal}><Clock3 size={15} /> Süre kaydet</button><button className="add-task-button" onClick={openGoalModal}><Plus size={16} /> Hedef oluştur</button></div></div>
+          <div className="learning-summary"><div className="learning-summary-copy"><span className="section-kicker">BU HAFTAKİ ÖĞRENME SÜRESİ</span><h3>{formatDuration(weeklyStudySeconds)} <span>kayıtlı</span></h3><p>{weeklySessionCount} zamanlayıcı oturumu · {manualStudyLogs.filter((log) => analysisWeek.some((day) => dateKey(day) === log.date)).reduce((sum, log) => sum + log.minutes, 0)} dk manuel kayıt</p></div><div className="study-bars">{week.map((day, i) => <div className="study-bar-column" key={day}><i style={{ height: `${Math.max(4, learningWeekByDay[i] / 60 / maxLearningMinutes * 100)}%` }} className={dateKey(analysisWeek[i]) === todayKey ? 'bar-today' : ''} /><small>{day}</small></div>)}</div></div>
+          <div className="learning-section-head"><div><span className="section-kicker">KÜÇÜK ADIMLAR</span><h3>Öğrenme hedeflerin</h3></div><button className="text-button" onClick={openGoalModal}><Plus size={14} /> Hedef ekle</button></div>
+          <div className="learning-goal-grid">{learningGoals.length ? learningGoals.map((goal) => { const completed = goal.milestones.filter((step) => step.done).length; const goalMinutes = manualStudyLogs.filter((log) => log.goalId === goal.id).reduce((sum, log) => sum + log.minutes, 0); const ratio = goal.milestones.length ? Math.round(completed / goal.milestones.length * 100) : 0; return <article className="learning-goal-card" key={goal.id}><div className="goal-card-head"><span className="goal-art"><BookOpen size={19} /></span><span className="goal-step-count">{completed}/{goal.milestones.length} adım</span></div><h3>{goal.title}</h3><p>{goal.description || 'Hedefini küçük ve tamamlanabilir adımlara böl.'}</p><div className="goal-progress-label"><span>Milestone ilerlemesi</span><b>{ratio}%</b></div><div className="goal-progress-track"><i style={{ width: `${ratio}%` }} /></div><div className="goal-milestones">{goal.milestones.length ? goal.milestones.map((step) => <button type="button" className={`milestone-row ${step.done ? 'is-complete' : ''}`} key={step.id} onClick={() => toggleMilestone(goal.id, step.id)} aria-pressed={step.done}><span>{step.done && <Check size={12} />}</span><b>{step.title}</b></button>) : <small className="milestone-empty">İlk adımını ekleyerek başla.</small>}</div><form className="milestone-add-form" onSubmit={(event) => addMilestone(event, goal.id)}><input aria-label={`${goal.title} için milestone ekle`} placeholder="Yeni bir küçük adım…" value={milestoneDrafts[goal.id] ?? ''} onChange={(event) => setMilestoneDrafts((drafts) => ({ ...drafts, [goal.id]: event.target.value }))} maxLength={70} /><button type="submit" disabled={!(milestoneDrafts[goal.id] ?? '').trim()} aria-label="Milestone ekle"><Plus size={15} /></button></form><div className="goal-study-time"><Clock3 size={13} /> {goalMinutes} dk manuel çalışma bu hedefle ilişkili</div></article> }) : <div className="learning-empty goal-empty"><span className="goal-empty-art"><Target size={22} /></span><b>Henüz öğrenme hedefi yok</b><span>Bir hedef oluştur; sonra onu takip edilebilir adımlara böl.</span><button className="text-button" onClick={openGoalModal}><Plus size={14} /> İlk hedefini oluştur</button></div>}</div>
+          <div className="learning-section-head"><div><span className="section-kicker">PLANIN</span><h3>Öğrenme görevlerin</h3></div><button className="soft-select" onClick={openNewTaskModal}><Plus size={13} /> {learningTasks.length} görev</button></div>
+          <div className="course-grid">{learningTasks.length ? learningTasks.map((task) => { const taskSeconds = focusSessions.filter((session) => session.taskTitle === task.title).reduce((sum, session) => sum + session.seconds, 0); return <article className="course-card course-purple" key={task.id}><div className="course-card-top"><span className="course-icon"><BookOpen size={19} /></span><span className={`task-state ${task.done ? 'state-done' : ''}`}>{task.done ? 'Tamamlandı' : 'Planlandı'}</span></div><span className="course-tag">ÖĞRENME · {task.date === todayKey ? 'BUGÜN' : task.date}</span><h3>{task.title}</h3><p>{task.time} · {task.duration} dakika planlandı</p><div className="course-footer"><span><Clock3 size={14} />{taskSeconds ? `${formatDuration(taskSeconds)} zamanlayıcı` : 'Henüz süre kaydı yok'}</span><button onClick={() => { setSelectedDay(task.date ?? todayKey); setCalendarAnchor(task.date ?? todayKey); setActiveTab('Takvim') }}>Takvimde gör <ArrowRight size={14} /></button></div></article> }) : <div className="learning-empty"><BookOpen size={22} /><b>Henüz öğrenme görevi yok</b><span>Bir öğrenme görevi oluşturup takvimine ekleyebilirsin.</span><button className="text-button" onClick={openNewTaskModal}><Plus size={14} /> Öğrenme görevi ekle</button></div>}</div>
+          <div className="study-log"><div className="section-heading"><div><span className="section-kicker">ÇALIŞMA GEÇMİŞİ</span><h3>Çalışma günlüğün</h3></div><button className="text-button" onClick={openStudyLogModal}><Plus size={14} /> Manuel kayıt</button></div>{studyLogEntries.length ? studyLogEntries.slice(0, 8).map((entry) => <div className="log-row" key={entry.id}><div className={`log-icon ${entry.source === 'Manuel kayıt' ? 'manual-log-icon' : ''}`}>{entry.source === 'Manuel kayıt' ? <Pencil size={15} /> : <BookOpen size={16} />}</div><div><b>{entry.title}</b><small>{entry.dateLabel} · {entry.source}{entry.note ? ` · ${entry.note}` : ''}</small></div><strong>{formatDuration(entry.seconds)}</strong>{entry.source === 'Zamanlayıcı' && <Check size={16} className="log-check" />}</div>) : <p className="empty-data-note">Henüz kayıt yok. Zamanlayıcıyı kullanabilir veya geçmiş bir çalışma süresini kendin ekleyebilirsin.</p>}</div>
+        </section>}
 
-        {activeTab === 'Analiz' && <section className="page-content secondary-page"><div className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> KENDİ RİTMİNİ KEŞFET</div><h1>İlerlemene <em>bir bak.</em></h1><p className="welcome-copy">Veriler yargılamak için değil, kendini daha iyi tanımak için.</p></div><button className="soft-select">Bu hafta <ChevronDown size={14} /></button></div><div className="insight-stats"><div className="insight-tile"><span className="section-kicker">GÖREV TAMAMLAMA</span><b>82<span>%</span></b><small><ArrowUpRight size={13} /> Geçen haftadan %8 fazla</small></div><div className="insight-tile"><span className="section-kicker">ODAK SÜRESİ</span><b>8.4<small>sa</small></b><small><ArrowUpRight size={13} /> Bu hafta +1.2 saat</small></div><div className="insight-tile"><span className="section-kicker">ALIŞKANLIK TUTARLILIĞI</span><b>76<span>%</span></b><small><ArrowUpRight size={13} /> Hedefinin üstündesin</small></div><div className="insight-tile"><span className="section-kicker">ÖĞRENME</span><b>4.4<small>sa</small></b><small><BookOpen size={13} /> 8 kilometre taşı tamamlandı</small></div></div><div className="insights-grid"><section className="chart-card"><div className="section-heading"><div><span className="section-kicker">PLANLANAN / GERÇEKLEŞEN</span><h3>Zamanını nasıl kullandın?</h3></div><button className="soft-select">Bu hafta <ChevronDown size={14} /></button></div><div className="legend"><span><i className="legend-planned" /> Planlanan</span><span><i className="legend-actual" /> Gerçekleşen</span></div><div className="chart-bars">{week.map((day, i) => <div className="chart-day" key={day}><div className="bar-pair"><i style={{ height: `${[56,72,49,88,63,38,25][i]}%` }} /><i style={{ height: `${[42,61,58,71,51,26,16][i]}%` }} /></div><small>{day}</small></div>)}</div></section><section className="category-card"><div className="section-heading compact"><div><span className="section-kicker">KATEGORİ DAĞILIMI</span><h3>Odak alanların</h3></div><button className="more-round"><MoreHorizontal size={18} /></button></div><div className="category-breakdown"><div className="donut-chart"><div><b>8.4</b><small>saat</small></div></div><div className="category-legend"><div><i className="legend-violet" /><span>Öğrenme</span><b>38%</b></div><div><i className="legend-lilac" /><span>Sağlık</span><b>27%</b></div><div><i className="legend-blue" /><span>Hobiler</span><b>21%</b></div><div><i className="legend-gray" /><span>Kişisel</span><b>14%</b></div></div></div></section><section className="trend-card"><div className="section-heading"><div><span className="section-kicker">KÜÇÜK BİR İÇGÖRÜ</span><h3>Sabahları daha tutarlısın</h3></div><span className="trend-icon"><TrendingUp size={17} /></span></div><p>Bu hafta sabah planladığın görevlerin <b>%88'ini</b> tamamladın. Öğleden sonra kendine biraz daha esneklik tanımışsın.</p><div className="trend-bottom"><span><Sparkles size={14} /> Veriden öğren, kendine göre planla.</span><button onClick={() => setToast('Analiz ayrıntıları yakında')}>Ayrıntılar <ArrowRight size={14} /></button></div></section><section className="category-time-card"><div className="section-heading"><div><span className="section-kicker">PLAN TUTARLILIĞI</span><h3>Tahminlerin zamanla</h3></div><button className="text-button">Son 4 hafta <ChevronDown size={14} /></button></div><div className="accuracy-row"><span>Görev sürelerini tahmin etme</span><b>+12%</b><ArrowUpRight size={15} /></div><div className="accuracy-track"><i style={{ width: '72%' }} /></div><p>Planladığın süreler ile gerçek çalışma süren birbirine yaklaşıyor.</p></section></div></section>}
+        {activeTab === 'Analiz' && <section className="page-content secondary-page"><div className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> KENDİ RİTMİNİ KEŞFET</div><h1>İlerlemene <em>bir bak.</em></h1><p className="welcome-copy">Veriler yargılamak için değil, kendini daha iyi tanımak için.</p></div><button className="soft-select">Bu hafta <ChevronDown size={14} /></button></div><div className="insight-stats">
+          <div className="insight-tile"><span className="section-kicker">GÖREV TAMAMLAMA</span><b>{weeklyCompletion}<span>%</span></b><small>{weeklyDoneTasks} / {weeklyTasks.length} görev bu hafta</small></div>
+          <div className="insight-tile"><span className="section-kicker">ODAK SÜRESİ</span><b>{Math.floor(weeklyFocusSeconds / 3600)}<small>sa</small></b><small>{Math.floor((weeklyFocusSeconds % 3600) / 60)} dk kaydedildi</small></div>
+          <div className="insight-tile"><span className="section-kicker">ALIŞKANLIK TUTARLILIĞI</span><b>{weeklyHabitProgress}<span>%</span></b><small>{weeklyHabitChecks} / {weeklyHabitTarget} haftalık işaret</small></div>
+          <div className="insight-tile"><span className="section-kicker">ÖĞRENME ODAĞI</span><b>{Math.floor(weeklyStudySeconds / 3600)}<small>sa</small></b><small>{Math.floor((weeklyStudySeconds % 3600) / 60)} dk · timer + manuel kayıt</small></div>
+        </div><div className="insights-grid"><section className="chart-card"><div className="section-heading"><div><span className="section-kicker">PLAN / ODAK KAYDI</span><h3>Plan ve odak zamanın</h3></div><button className="soft-select">Bu hafta <ChevronDown size={14} /></button></div><div className="legend"><span><i className="legend-planned" /> Planlanan</span><span><i className="legend-actual" /> Odak kaydı</span></div><div className="chart-bars">{week.map((day, i) => <div className="chart-day" key={day}><div className="bar-pair"><i title={`Planlanan ${planWeekByDay[i]} dakika`} style={{ height: `${Math.max(4, planWeekByDay[i] / maxWeeklyMinutes * 100)}%` }} /><i title={`Odak ${Math.floor(focusWeekByDay[i] / 60)} dakika`} style={{ height: `${Math.max(4, focusWeekByDay[i] / 60 / maxWeeklyMinutes * 100)}%` }} /></div><small>{day}</small></div>)}</div></section><section className="category-card"><div className="section-heading compact"><div><span className="section-kicker">KATEGORİ DAĞILIMI</span><h3>Odak alanların</h3></div><button className="more-round"><MoreHorizontal size={18} /></button></div><div className="category-breakdown"><div className="donut-chart" style={{ background: categoryDonutGradient }}><div><b>{Math.floor(weeklyFocusSeconds / 3600)}</b><small>sa odak</small></div></div><div className="category-legend">{weeklyCategoryTotals.length ? weeklyCategoryTotals.map((item) => <div key={item.category}><i style={{ background: categoryPalette[item.category] ?? '#a89aba' }} /><span>{item.category}</span><b>{Math.round(item.seconds / categoryTotalSeconds * 100)}%</b></div>) : <p className="empty-data-note">Odak oturumu kaydedildikçe kategori dağılımı burada görünür.</p>}</div></div></section><section className="trend-card"><div className="section-heading"><div><span className="section-kicker">KÜÇÜK BİR İÇGÖRÜ</span><h3>Bu haftanın odağı</h3></div><span className="trend-icon"><TrendingUp size={17} /></span></div><p>Bu hafta <b>{weeklySessionCount} odak oturumu</b> kaydettin. {weeklyFocusSeconds ? `${Math.floor(weeklyFocusSeconds / 60)} dakika odak süresi` : 'İlk odak oturumunu tamamladığında süre burada görünecek.'}</p><div className="trend-bottom"><span><Sparkles size={14} /> Veriden öğren, kendine göre planla.</span><button onClick={() => setToast('Analiz ayrıntıları yakında')}>Ayrıntılar <ArrowRight size={14} /></button></div></section><section className="category-time-card"><div className="section-heading"><div><span className="section-kicker">SÜRE KAYDI</span><h3>Plan ve odak verisi</h3></div><button className="text-button">Son 4 hafta <ChevronDown size={14} /></button></div><div className="accuracy-row"><span>Planlanan {weeklyPlanMinutes} dk · kaydedilen {Math.floor(weeklyFocusSeconds / 60)} dk</span><b>{recordedOfPlanned}%</b></div><div className="accuracy-track"><i style={{ width: `${recordedOfPlanned}%` }} /></div><p>Odak verisi yalnızca zamanlayıcıyla kaydedilen oturumları içerir; görev süresi gerçekleşen süre sayılmaz.</p></section></div><section className="data-tools-card"><div className="data-tools-illustration"><ShieldCheck size={20} /></div><div className="data-tools-copy"><span className="section-kicker">VERİLERİNİN KONTROLÜ SENDE</span><h3>Yedekle veya geri yükle</h3><p>Veriler varsayılan olarak bu cihazda kalır. JSON yedeği görevleri, rutinleri, öğrenme hedeflerini, özel kategorileri ve kayıtları içerir.</p></div><div className="data-tools-actions"><button className="secondary-action-button" onClick={exportBackup}><ArrowDownToLine size={15} /> Yedek indir</button><button className="add-task-button" onClick={() => importInputRef.current?.click()}><Upload size={15} /> Yedek seç</button><input ref={importInputRef} className="visually-hidden-file" type="file" accept="application/json,.json" onChange={importBackup} /></div></section></section>}
       </main>
 
-      {modalOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setModalOpen(false) }}><form className="task-modal" onSubmit={addTask}><div className="modal-top"><div><span className="section-kicker">YENİ BİR ADIM</span><h2>Görevini planla</h2></div><button type="button" className="icon-button" onClick={() => setModalOpen(false)} aria-label="Kapat"><X size={19} /></button></div><label htmlFor="task-title">Görev adı</label><input id="task-title" autoFocus placeholder="Ne yapmak istiyorsun?" value={taskName} onChange={(event) => setTaskName(event.target.value)} /><div className="form-row"><div><label htmlFor="task-time">Saat</label><input id="task-time" name="time" type="time" defaultValue="18:00" /></div><div><label htmlFor="task-duration">Süre</label><select id="task-duration" name="duration" defaultValue="30"><option value="15">15 dakika</option><option value="30">30 dakika</option><option value="45">45 dakika</option><option value="60">1 saat</option></select></div></div><div className="modal-note"><Sparkles size={15} /> Planın değişirse önce sana soracağız.</div><button className="start-button modal-submit" type="submit"><Plus size={16} /> Takvime ekle</button></form></div>}
-      {toast && <div className="toast"><span><Check size={15} /></span>{toast}</div>}
+      <nav className="mobile-tab-bar" aria-label="Alt gezinme">
+        {navItems.map(({ label, icon: Icon }) => (
+          <button
+            key={label}
+            className={`mobile-tab ${activeTab === label ? 'active' : ''}`}
+            onClick={() => setActiveTab(label)}
+            aria-label={label}
+            aria-current={activeTab === label ? 'page' : undefined}
+          >
+            <Icon size={19} strokeWidth={activeTab === label ? 2.2 : 1.8} />
+            <span>{label === 'Alışkanlıklar' ? 'Rutinler' : label}</span>
+          </button>
+        ))}
+      </nav>
+
+      {settingsOpen && <div className="modal-backdrop search-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false) }}><section className="task-modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><div className="modal-top"><div className="planner-heading"><span className="planner-mark"><Settings2 size={18} /></span><div><span className="section-kicker">KONTROL SENDE</span><h2 id="settings-title">Ayarlar</h2><p>Eşitleme, hatırlatmalar ve kısa yollar.</p></div></div><button type="button" className="icon-button" onClick={() => setSettingsOpen(false)} aria-label="Ayarları kapat"><X size={19} /></button></div><section className="settings-section"><span className="section-kicker">G · ŞİFRELİ BULUT EŞİTLEME</span><h3>Yalnızca sen başlatınca aktarılır</h3><p className="settings-copy">Eşitleme parolan cihazında AES-GCM şifrelemesi için kullanılır ve sunucuya gönderilmez. Worker yalnızca şifreli içerik saklar. İlk gönderme ve bu cihaza geri yükleme ayrıca onay ister.</p>{!syncToken ? <form className="settings-connect-form" onSubmit={connectCloudSync}><label>Worker API adresi<input type="url" value={syncApiUrl} onChange={(event) => setSyncApiUrl(event.target.value)} required placeholder="https://…workers.dev" /></label><label>Worker erişim parolası<input type="password" value={syncPassword} onChange={(event) => setSyncPassword(event.target.value)} required autoComplete="current-password" /></label><button type="submit" className="secondary-action-button">Güvenli oturum aç</button></form> : <div className="settings-connect-form"><div className="connection-state"><span className="status-pip" /> Worker oturumu açık · veri aktarımı başlamadı</div><label>Eşitleme parolası <small>12+ karakter; diğer cihazlarda da aynı parolayı kullan. Uygulama saklamaz.</small><input type="password" minLength={12} value={syncPassphrase} onChange={(event) => setSyncPassphrase(event.target.value)} autoComplete="new-password" /></label><div className="settings-button-row"><button type="button" className="secondary-action-button" onClick={uploadEncryptedSync}><ArrowDownToLine size={15} /> Şifrele ve buluta gönder</button><button type="button" className="secondary-action-button" onClick={downloadEncryptedSync}><Upload size={15} /> Şifreli yedeği indir</button></div><button type="button" className="plain-settings-button" onClick={disconnectCloudSync}>Oturumu kapat</button></div>}</section><section className="settings-section"><span className="section-kicker">F · GÖREV HATIRLATMALARI</span><h3>{remindersOn ? 'Hatırlatmalar açık' : 'Hatırlatmalar kapalı'}</h3><p className="settings-copy">Görev saatinde ve sonra her 5 dakikada bir hatırlatma isteği gönderilir; tamamlamak, ertelemek, arşivlemek veya silmek durdurur. Hatırlatma için görev zamanı ve başlığı Worker'a iletilir; gizlilik açıkken başlık D1'de genel metne çevrilir. Teslimat tarayıcı ve işletim sistemine bağlıdır.</p><div className="settings-connect-form"><div className="form-row"><div><label htmlFor="quiet-start">Sessiz saat başlangıcı</label><input id="quiet-start" type="time" value={quietStart} onChange={(event) => setQuietStart(event.target.value)} /></div><div><label htmlFor="quiet-end">Sessiz saat bitişi</label><input id="quiet-end" type="time" value={quietEnd} onChange={(event) => setQuietEnd(event.target.value)} /></div></div><label>Bildirim metni<select value={reminderWording} onChange={(event) => setReminderWording(event.target.value as 'brief' | 'task')}><option value="brief">Kısa: “Görev zamanı.”</option><option value="task">Görev başlığını göster</option></select></label><label className="settings-check"><input type="checkbox" checked={privacyMode} onChange={(event) => setPrivacyMode(event.target.checked)} /><span>Kilit ekranında görev başlığını gizle</span></label><div className="settings-button-row"><button type="button" className="secondary-action-button" disabled={!syncToken} onClick={() => { const form = document.getElementById('reminder-save-proxy') as HTMLFormElement | null; form?.requestSubmit() }}>Tercihleri kaydet</button>{remindersOn ? <button type="button" className="plain-settings-button" onClick={disableTaskReminders}>Bu cihazda kapat</button> : <button type="button" className="add-task-button" disabled={!syncToken} onClick={enableTaskReminders}><Bell size={15} /> Hatırlatmaları etkinleştir</button>}</div><form id="reminder-save-proxy" onSubmit={saveReminderPreferences} /></div></section><section className="settings-section"><span className="section-kicker">I · ÖZEL KATEGORİLER</span><h3>Kategorilerin</h3><p className="settings-copy">Yeni kategoriyi görev planlarken de ekleyebilirsin.</p><div className="settings-category-list">{availableCategories.map((category) => <span key={category.label}>{category.label}{customCategories.includes(category.label) && <button type="button" aria-label={`${category.label} kategorisini kaldır`} onClick={() => { if (tasks.some((task) => task.category === category.label)) { setToast('Bu kategori görevlerde kullanılıyor; önce görevlerini başka kategoriye taşı.'); return } setCustomCategories((items) => items.filter((item) => item !== category.label)) }}>×</button>}</span>)}</div></section><section className="settings-section"><span className="section-kicker">K · KESTİRMELER</span><h3>Hızlı açılışlar</h3><p className="settings-copy">Manifest kısayolları desteklenen kurulumlarda görünür. iOS Kestirmeler’de “URL’yi aç” eylemine aşağıdaki bağlantıyı ekle. iOS PWA’larında yerel ana ekran widget’ı web uygulamasıyla sunulamıyor.</p><div className="settings-button-row"><button type="button" className="secondary-action-button" onClick={() => copyQuickLink('add-task')}>Görev ekle URL’si</button><button type="button" className="secondary-action-button" onClick={() => copyQuickLink('calendar')}>Takvim URL’si</button><button type="button" className="secondary-action-button" onClick={() => copyQuickLink('start-focus')}>Odak URL’si</button></div></section>{syncStatus && <div className="sync-status" role="status">{syncStatus}</div>}</section></div>}
+      {searchOpen && <div className="modal-backdrop search-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSearchOpen(false) }}><section className="task-modal search-modal" role="dialog" aria-modal="true" aria-labelledby="search-title"><div className="modal-top"><div className="planner-heading"><span className="planner-mark"><Search size={18} /></span><div><span className="section-kicker">GÖREV ARŞİVİ</span><h2 id="search-title">Bul ve düzenle</h2><p>Görev adı, kategori veya not içinde ara.</p></div></div><button type="button" className="icon-button" onClick={() => setSearchOpen(false)} aria-label="Aramayı kapat"><X size={19} /></button></div><label className="search-input-wrap"><Search size={17} /><input autoFocus value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Görev veya kategori ara…" /></label><div className="search-tabs"><button type="button" className={!showArchived ? 'selected' : ''} onClick={() => setShowArchived(false)}>Aktif görevler</button><button type="button" className={showArchived ? 'selected' : ''} onClick={() => setShowArchived(true)}>Arşiv ({tasks.filter((task) => task.archived).length})</button></div><div className="search-results">{searchResults.length ? searchResults.map((task) => <article className="search-result" key={task.id}><button type="button" className="search-result-main" onClick={() => { setSelectedDay(task.date ?? todayKey); setCalendarAnchor(task.date ?? todayKey); setActiveTab('Takvim'); setSearchOpen(false) }}><span className={`recommendation-task-icon tone-${availableCategories.find((item) => item.label === task.category)?.tone ?? 'lilac'}`}><Focus size={16} /></span><span><b>{task.title}</b><small>{task.category} · {task.date ?? todayKey} · {task.time}{task.done ? ' · Tamamlandı' : ''}</small></span><ArrowRight size={15} /></button><button type="button" className="archive-action" onClick={() => { setTasks((items) => items.map((item) => item.id === task.id ? { ...item, archived: !item.archived } : item)); setToast(task.archived ? 'Görev arşivden çıkarıldı.' : 'Görev arşivlendi.') }}>{task.archived ? 'Geri al' : 'Arşivle'}</button></article>) : <div className="search-empty"><Search size={20} /><b>{showArchived ? 'Arşiv boş' : 'Eşleşen görev yok'}</b><span>Arama kelimeni değiştirebilir veya başka bir kategori deneyebilirsin.</span></div>}</div></section></div>}
+      {modalOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeTaskModal() }}><form className="task-modal task-planner-modal" onSubmit={handleTaskFormSubmit}>
+        <div className="modal-top"><div className="planner-heading"><span className="planner-mark"><Sparkles size={18} /></span><div><span className="section-kicker">{editingTask ? 'GÖREVİNİ GÜNCELLE' : 'KENDİ RİTMİNİ KUR'}</span><h2>{editingTask ? 'Görevi düzenle' : 'Görevini planla'}</h2><p>Önce görevi seç, sonra sana uygun planı kur.</p></div></div><button type="button" className="icon-button" onClick={closeTaskModal} aria-label="Kapat"><X size={19} /></button></div>
+        <div className="planner-stepper" aria-label="Planlama adımları"><span className={plannerStep === 1 ? 'active' : 'complete'}><i>01</i><b>Görevini tanımla</b></span><em /><span className={plannerStep === 2 ? 'active' : ''}><i>02</i><b>Zamanını seç</b></span></div>
+        {plannerStep === 1 ? <div className="planner-page" key="task-step-one"><div className="planner-intro"><span className="step-eyebrow">ADIM 1 · NE YAPACAKSIN?</span><h3>Önce niyetini belirle.</h3><p>Bir kategori seç; bu görev için uygun simge ve analiz alanı onunla eşleşecek.</p></div><label htmlFor="task-title">Görev adı</label><input id="task-title" autoFocus placeholder="Örn. İngilizce konuşma pratiği" value={taskName} onChange={(event) => setTaskName(event.target.value)} maxLength={80} /><div className="selection-field"><span className="form-label">Hangi alanına ait?</span><div className="category-choice-grid" role="group" aria-label="Görev kategorisi">{availableCategories.map(({ label, icon: CategoryIcon, tone, description }) => <button type="button" key={label} className={`category-choice tone-${tone} ${taskCategory === label ? 'selected' : ''}`} aria-pressed={taskCategory === label} onClick={() => setTaskCategory(label)}><span className="category-choice-icon"><CategoryIcon size={18} /></span><span className="category-choice-copy"><b>{label}</b><small>{description}</small></span>{taskCategory === label && <Check size={14} className="choice-check" />}</button>)}</div><div className="custom-category-create"><input aria-label="Yeni kategori adı" maxLength={24} placeholder="Özel kategori adı" value={customCategoryDraft} onChange={(event) => setCustomCategoryDraft(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); const name = customCategoryDraft.trim(); if (name && !availableCategories.some((item) => item.label.toLocaleLowerCase('tr-TR') === name.toLocaleLowerCase('tr-TR'))) { setCustomCategories((items) => [...items, name]); setTaskCategory(name); setCustomCategoryDraft('') } } }} /><button type="button" onClick={() => { const name = customCategoryDraft.trim(); if (!name) return; if (availableCategories.some((item) => item.label.toLocaleLowerCase('tr-TR') === name.toLocaleLowerCase('tr-TR'))) { setToast('Bu kategori zaten var.'); return } setCustomCategories((items) => [...items, name]); setTaskCategory(name); setCustomCategoryDraft('') }}>Kategori ekle</button></div></div><div className="selected-category-note"><span className={`selected-category-icon tone-${availableCategories.find((item) => item.label === taskCategory)?.tone ?? 'lilac'}`}>{(() => { const Icon = availableCategories.find((item) => item.label === taskCategory)?.icon ?? Focus; return <Icon size={16} /> })()}</span><span><b>{taskCategory}</b><small>{availableCategories.find((item) => item.label === taskCategory)?.description}</small></span><span className="selection-ready">SEÇİLDİ</span></div></div> : <div className="planner-page" key="task-step-two"><div className="planner-intro"><span className="step-eyebrow">ADIM 2 · UYGUN BİR YER AÇ</span><h3>Ne zaman ve nasıl?</h3><p>Tarih ve süre yalnızca bu görevi planlar; başka görevlerin yerini değiştirmez.</p></div><div className="form-row"><div><label htmlFor="task-date">Tarih</label><input id="task-date" name="date" type="date" value={taskDate} onChange={(event) => setTaskDate(event.target.value)} required /></div><div><label htmlFor="task-time">Başlangıç saati</label><input id="task-time" name="time" type="time" value={taskTime} onChange={(event) => setTaskTime(event.target.value)} required /></div></div><div className="selection-field duration-field"><span className="form-label">Planlanan süre</span><div className="duration-choice-grid" role="group" aria-label="Planlanan süre">{durationChoices.map((minutes) => <button type="button" key={minutes} className={taskDuration === minutes ? 'selected' : ''} aria-pressed={taskDuration === minutes} onClick={() => setTaskDuration(minutes)}><b>{minutes}</b><small>dk</small></button>)}</div></div><div className="selection-field"><span className="form-label">Öncelik</span><div className="detail-choice-grid priority-choice-grid" role="group" aria-label="Görev önceliği">{priorityChoices.map(({ value, label, note, icon: ChoiceIcon }) => <button type="button" key={value} className={`detail-choice priority-${value} ${taskPriority === value ? 'selected' : ''}`} aria-pressed={taskPriority === value} onClick={() => setTaskPriority(value)}><span><ChoiceIcon size={16} /></span><b>{label}</b><small>{note}</small></button>)}</div></div><div className="selection-field"><span className="form-label">Bu görev nasıl bir enerji istiyor?</span><div className="detail-choice-grid energy-choice-grid" role="group" aria-label="Görev eforu">{energyChoices.map(({ value, label, note, icon: ChoiceIcon }) => <button type="button" key={value} className={`detail-choice energy-${value} ${taskEnergy === value ? 'selected' : ''}`} aria-pressed={taskEnergy === value} onClick={() => setTaskEnergy(value)}><span><ChoiceIcon size={16} /></span><b>{label}</b><small>{note}</small></button>)}</div></div><div className="notes-field"><label htmlFor="task-notes">Kendine not <span>İsteğe bağlı</span></label><textarea id="task-notes" value={taskNotes} onChange={(event) => setTaskNotes(event.target.value)} maxLength={180} placeholder="Hazırlamam gerekenler, küçük bir hatırlatma…" /></div><div className="plan-preview"><span className="preview-icon"><CalendarDays size={17} /></span><span><small>PLAN ÖNİZLEMESİ</small><b>{taskDate ? new Intl.DateTimeFormat('tr-TR', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${taskDate}T00:00:00`)) : 'Tarih seç'} · {taskTime || 'Saat seç'} · {taskDuration} dk</b></span><span className={`priority-chip priority-${taskPriority}`}>{taskPriority === 'high' ? 'Öncelikli' : taskPriority === 'low' ? 'Esnek' : 'Normal'}</span></div></div>}
+        <div className="planner-actions">{plannerStep === 2 ? <button type="button" className="planner-back" onClick={() => setPlannerStep(1)}><ChevronLeft size={16} /> Görev bilgilerine dön</button> : <span className="planner-reassurance"><ShieldCheck size={15} /> Planı yalnızca sen değiştirirsin.</span>}{plannerStep === 1 ? <button type="button" className="start-button planner-next" disabled={!taskName.trim()} onClick={() => setPlannerStep(2)}>Zamanını seç <ArrowRight size={16} /></button> : <button type="submit" className="start-button planner-next">{editingTask ? <Check size={16} /> : <Plus size={16} />}{editingTask ? 'Değişiklikleri kaydet' : 'Görevi planla'}</button>}</div>
+      </form></div>}
+      {habitModalOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setHabitModalOpen(false) }}><form className="task-modal" onSubmit={addHabit}><div className="modal-top"><div><span className="section-kicker">YENİ BİR RİTÜEL</span><h2>Alışkanlık ekle</h2></div><button type="button" className="icon-button" onClick={() => setHabitModalOpen(false)} aria-label="Kapat"><X size={19} /></button></div><label htmlFor="habit-name">Alışkanlık adı</label><input id="habit-name" autoFocus placeholder="Örn. 10 dakika yürüyüş" value={habitName} onChange={(event) => setHabitName(event.target.value)} /><span className="form-label">Haftalık sıklık</span><div className="frequency-choice-grid" role="group" aria-label="Haftalık tekrar sayısı">{[1,2,3,4,5,6,7].map((count) => <button type="button" key={count} className={habitWeeklyTarget === count ? 'selected' : ''} aria-pressed={habitWeeklyTarget === count} onClick={() => setHabitWeeklyTarget(count)}><b>{count}</b><small>{count === 7 ? 'gün' : 'kez'}</small></button>)}</div><p className="frequency-caption">{habitWeeklyTarget === 7 ? 'Her gün' : `Haftada ${habitWeeklyTarget} kez`}</p><input type="hidden" name="weekly-target" value={habitWeeklyTarget} /><div className="modal-note"><Sparkles size={15} /> İlerlemeni her gün kendi ritminde işaretle.</div><button className="start-button modal-submit" type="submit"><Plus size={16} /> Alışkanlığı ekle</button></form></div>}
+      {studyLogModalOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setStudyLogModalOpen(false) }}><form className="task-modal" onSubmit={addManualStudyLog}><div className="modal-top"><div className="planner-heading"><span className="planner-mark"><Clock3 size={18} /></span><div><span className="section-kicker">ÖĞRENME KAYDI</span><h2>Çalışma süresi ekle</h2><p>Geçmiş bir çalışmayı da manuel kaydedebilirsin.</p></div></div><button type="button" className="icon-button" onClick={() => setStudyLogModalOpen(false)} aria-label="Kapat"><X size={19} /></button></div><label htmlFor="study-log-title">Çalışma başlığı</label><input id="study-log-title" autoFocus required maxLength={80} placeholder="Örn. İspanyolca kelime tekrarı" value={studyLogTitle} onChange={(event) => setStudyLogTitle(event.target.value)} /><div className="form-row"><div><label htmlFor="study-log-date">Tarih</label><input id="study-log-date" type="date" value={studyLogDate} onChange={(event) => setStudyLogDate(event.target.value)} required /></div><div><label htmlFor="study-log-minutes">Süre (dakika)</label><input id="study-log-minutes" type="number" min="1" max="600" value={studyLogMinutes} onChange={(event) => setStudyLogMinutes(Number(event.target.value))} required /></div></div><label htmlFor="study-log-goal">İlişkili hedef <span>İsteğe bağlı</span></label><select id="study-log-goal" value={studyLogGoalId} onChange={(event) => setStudyLogGoalId(event.target.value)}><option value="">Hedef seçmeden kaydet</option>{learningGoals.map((goal) => <option key={goal.id} value={goal.id}>{goal.title}</option>)}</select><div className="notes-field"><label htmlFor="study-log-note">Kısa not <span>İsteğe bağlı</span></label><textarea id="study-log-note" maxLength={160} value={studyLogNote} onChange={(event) => setStudyLogNote(event.target.value)} placeholder="Neye çalıştın veya ne öğrendin?" /></div><button type="submit" className="start-button modal-submit"><Check size={16} /> Süreyi kaydet</button></form></div>}
+      {goalModalOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setGoalModalOpen(false) }}><form className="task-modal" onSubmit={addLearningGoal}><div className="modal-top"><div className="planner-heading"><span className="planner-mark"><Target size={18} /></span><div><span className="section-kicker">ÖĞRENME YOLCULUĞU</span><h2>Yeni hedef oluştur</h2><p>Başlamak için bir hedef ve ilk adımını tanımla.</p></div></div><button type="button" className="icon-button" onClick={() => setGoalModalOpen(false)} aria-label="Kapat"><X size={19} /></button></div><label htmlFor="goal-title">Ne öğrenmek istiyorsun?</label><input id="goal-title" autoFocus required maxLength={70} placeholder="Örn. Temel fotoğrafçılık" value={goalTitle} onChange={(event) => setGoalTitle(event.target.value)} /><label htmlFor="goal-description">Hedefinin açıklaması <span>İsteğe bağlı</span></label><textarea id="goal-description" maxLength={160} placeholder="Bu hedef senin için neden önemli?" value={goalDescription} onChange={(event) => setGoalDescription(event.target.value)} /><label htmlFor="goal-first-step">İlk milestone <span>İsteğe bağlı</span></label><input id="goal-first-step" maxLength={70} placeholder="Örn. Kamera ayarlarını öğren" value={goalFirstMilestone} onChange={(event) => setGoalFirstMilestone(event.target.value)} /><div className="modal-note"><ShieldCheck size={15} /> İlerleme yalnızca tamamladığın adımlara göre hesaplanır.</div><button type="submit" className="start-button modal-submit"><Plus size={16} /> Hedefi oluştur</button></form></div>}
+      {pendingMove && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPendingMove(null) }}><div className="task-modal move-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="move-confirm-title"><div className="modal-top"><div className="planner-heading"><span className="planner-mark"><CalendarDays size={18} /></span><div><span className="section-kicker">TAKVİM DEĞİŞİKLİĞİ</span><h2 id="move-confirm-title">Görevi taşıyalım mı?</h2><p>Görev ancak onaylarsan yeni güne alınır.</p></div></div><button type="button" className="icon-button" onClick={() => setPendingMove(null)} aria-label="Kapat"><X size={19} /></button></div><div className="move-preview"><div><small>ŞİMDİ</small><b>{new Intl.DateTimeFormat('tr-TR', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${pendingMove.originalDate}T00:00:00`))}</b><span>{pendingMove.originalTime}</span></div><ArrowRight size={17} /><div><small>YENİ GÜN</small><b>{new Intl.DateTimeFormat('tr-TR', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${pendingMove.targetDate}T00:00:00`))}</b><span>{pendingMove.originalTime}</span></div></div><div className="move-task-name">{tasks.find((task) => task.id === pendingMove.taskId)?.title}</div><div className="planner-actions"><button className="planner-back" onClick={() => setPendingMove(null)}>Vazgeç</button><button className="start-button planner-next" onClick={confirmTaskMove}>Evet, bu güne taşı</button></div></div></div>}
+      {toast && <div className="toast" role="status" aria-live="polite"><span><Check size={15} /></span>{toast}{undoAction && (toast === 'Görev silindi.' || toast === 'Görev 10 dakika ertelendi.') && <button onClick={undoTaskChange}><Undo2 size={14} /> Geri al</button>}</div>}
     </div>
   )
 }

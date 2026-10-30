@@ -4,20 +4,16 @@ This Worker is the private API and scheduled Web Push sender for Violet Focus. I
 
 ## Cloudflare setup (after the code is pushed)
 
-### 1. Create the D1 database
+### 1. Use the existing D1 database
 
-From this directory, authenticate Wrangler and create the database:
+`wrangler.jsonc` already references the existing `hbkdaytask` database and `hbkd1` binding. Do not create another database or run `wrangler d1 create`. From this directory, authenticate Wrangler and apply any pending migrations only after reviewing the target database and receiving approval for the live change:
 
 ```bash
 npx wrangler login
-npx wrangler d1 create hbkdaytask
-```
-
-The database ID supplied for this project is already set in `wrangler.jsonc` (do not use the demo database from Cloudflare's `d1-get-started` template). If you create a replacement database later, update `d1_databases[0].database_id`. Then apply the migration:
-
-```bash
 npx wrangler d1 migrations apply hbkdaytask --remote
 ```
+
+Do not use the demo database from Cloudflare's `d1-get-started` template. If the existing database ID must be verified, check the Cloudflare dashboard before applying migrations.
 
 ### 2. Configure Worker values and secrets
 
@@ -57,6 +53,19 @@ The API will be available at the Worker's `workers.dev` URL. A Cron Trigger is c
 - `GET /api/tasks`, `POST /api/tasks`, `PATCH /api/tasks/:id` — reminder task API (authenticated)
 
 The API requires an exact allowed origin and authenticated sessions for private routes. CORS is not a substitute for authentication. Push delivery is best-effort; browser and operating-system behavior can delay or suppress notifications.
+
+Additional routes:
+
+- `GET /api/sync` and `PUT /api/sync` — retrieve/store one encrypted personal backup envelope (authenticated). The browser encrypts with PBKDF2-SHA-256 and AES-GCM before upload; D1 stores only `salt`, `iv`, and ciphertext. The sync passphrase is never sent to this Worker. Each explicit upload replaces the previous cloud envelope; there is no record-level merge or automatic/background sync.
+- `GET /api/reminders/settings` and `PUT /api/reminders/settings` — store quiet-hour, wording, and lock-screen privacy choices (authenticated). Quiet hours use `Europe/Istanbul`.
+
+Migration `0002_sync_and_reminder_settings.sql` adds the encrypted vault and reminder settings tables. It must be applied to the existing `hbkdaytask` database before these routes can work:
+
+```bash
+npx wrangler d1 migrations apply hbkdaytask --remote
+```
+
+The encrypted backup vault receives data only after the user opens Settings, authenticates, enters a separate sync passphrase, and explicitly chooses upload or download. Separately, enabling push reminders sends task IDs, titles, categories, due times, durations, and statuses to the Worker over HTTPS so its Cron trigger can schedule delivery. With lock-screen privacy enabled, task titles/categories are replaced with generic values before D1 storage; the Worker still receives the request fields in memory. Do not deploy the Worker or apply a remote migration without reviewing the target database and exact `APP_ORIGIN` first.
 
 ## Local development
 

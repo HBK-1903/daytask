@@ -1,38 +1,44 @@
 # Violet Focus
 
-Violet Focus is a personal-first planning PWA for daily tasks, habits, learning, and focus. Its home screen puts the next action first; planning suggestions never silently rearrange the user's schedule.
+Kişisel kullanım için, çevrimdışı çalışabilen bir planlama PWA'sı. Uygulama Vite/React ile derlenir; statik çıktı `dist/` klasörüne alınır.
 
-## Local development
+## Geliştirme
 
 ```bash
 npm install
 npm run dev
 ```
 
-Create a production build with:
+Üretim derlemesi:
 
 ```bash
 npm run build
 ```
 
-Vite writes the deployable site to `dist/`.
+## PWA'yı iPhone'a ekleme
 
-## Cloudflare Pages
+1. Siteyi Safari'de aç.
+2. Paylaş düğmesi → **Ana Ekrana Ekle**.
+3. Violet Focus'u ana ekrandan aç.
 
-Connect this GitHub repository to Cloudflare Pages and use:
+Web uygulaması manifestinde desteklenen platformlar için **Görev ekle**, **Takvim** ve **Odak başlat** kısayolları bulunur. iOS'taki Kestirmeler uygulamasında **URL'yi aç** eylemine aşağıdaki bağlantıları ekleyebilirsin:
 
-- **Framework preset:** Vite
-- **Build command:** `npm run build`
-- **Build output directory:** `dist`
-- **Root directory:** `/`
-- **Production branch:** `main`
+- `https://<uygulama-adresi>/?action=add-task`
+- `https://<uygulama-adresi>/?action=calendar`
+- `https://<uygulama-adresi>/?action=start-focus`
 
-The frontend currently stores task changes in this browser's local storage; habits, learning, and analytics are still seeded prototype data. A separate Worker/D1 backend scaffold now lives in `worker/` with authenticated API routes and a scheduled Web Push sender. It is not deployed or wired into the frontend yet: first create the app's D1 database, replace the Wrangler placeholders, configure secrets and the Pages origin, then connect the PWA to the API. Browser notification delivery is best-effort and depends on user permission, browser, and operating system.
+Uygulamanın **Ayarlar → Kestirmeler** bölümündeki düğmeler tam adresi panoya kopyalar. iOS PWA'ları web uygulamasından yerel ana ekran widget'ı sağlayamaz; widget için yerel iOS uygulaması gerekir.
 
-## Current prototype
+## Şifreli, isteğe bağlı eşitleme
 
-- Violet Focus lavender / violet glass visual system and responsive layout
-- Main navigation: Now, Calendar, Habits, Learning, Insights
-- Task completion, local task persistence, focus timer, task creation modal
-- Habit interaction, learning and analytics views (currently seeded sample data)
-- Installable PWA manifest and generated service worker
+**Ayarlar → Şifreli bulut eşitleme** bölümünde Worker oturumu açılabilir. Buluta gönderme ve başka cihazdan geri yükleme ayrı düğmelerle ve onayla yapılır; otomatik/arka plan eşitlemesi yoktur. Yedek tarayıcıda PBKDF2-SHA-256 (310.000 tur) ve AES-GCM-256 ile şifrelenir. Eşitleme parolası sunucuya gönderilmez veya uygulamada saklanmaz. Worker yalnızca şifreli metni ve IV/salt bilgisini tutar. Parolayı kaybedersen şifreli yedek açılamaz. Her yeni gönderme mevcut bulut kopyasının yerini alır; iki cihazın değişikliklerini birleştirmez.
+
+Worker API, D1 ve gerekli gizli değerler yapılandırılıp dağıtılmadıkça eşitleme etkinleştirilemez. Kurulum adımları `worker/README.md` içindedir. Kod değişikliği tek başına canlı servisi dağıtmaz veya herhangi bir veriyi buluta göndermez.
+
+## Hatırlatmalar
+
+Hatırlatmalar kullanıcı açıkça etkinleştirirse Web Push kullanır. Worker Cron görevi zamanında başlar ve görev tamamlanana, ertelenene, arşivlenene ya da silinene kadar beş dakikalık aralıklarla yeniden dener. Sessiz saatler `Europe/Istanbul` saat diliminde uygulanır; kilit ekranı gizliliği ve metin seçimi Ayarlar'dan yönetilir. Push teslimatı tarayıcı/işletim sistemi tarafından geciktirilebilir veya engellenebilir; kesin teslimat garantisi yoktur. Push kurulumu için Worker/VAPID sırlarının yapılandırılması gerekir.
+
+## Yerel veri
+
+Görevler, alışkanlıklar, öğrenme kayıtları, özel kategoriler ve odak verileri varsayılan olarak bu cihazda saklanır. Analiz verileri ölçülmüş oturumlardan hesaplanır; görev süresi gerçekleşen süre gibi gösterilmez.

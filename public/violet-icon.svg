@@ -1,1 +1,18 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#a889f0"/><stop offset="1" stop-color="#6747c4"/></linearGradient></defs><rect width="512" height="512" rx="136" fill="url(#g)"/><path d="m256 83 34 104 104 34-104 34-34 104-34-104-104-34 104-34z" fill="#fff"/><circle cx="371" cy="142" r="20" fill="#e8dcff"/><circle cx="144" cy="365" r="13" fill="#d8c7ff"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="violet" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#c29eeb"/>
+      <stop offset=".48" stop-color="#6d45bb"/>
+      <stop offset="1" stop-color="#280653"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#violet)"/>
+  <circle cx="256" cy="291" r="166" fill="none" stroke="#f7edff" stroke-width="5" opacity=".92"/>
+  <g fill="#fff7ff">
+    <path d="M256 94c-31 40-30 63 0 90 30-27 31-50 0-90Z"/>
+    <path d="M250 184c-8-43-32-61-69-62 15 27 34 51 69 62Z"/>
+    <path d="M262 184c8-43 32-61 69-62-15 27-34 51-69 62Z"/>
+  </g>
+  <text x="128" y="353" fill="#fff7ff" font-family="Georgia, 'Times New Roman', serif" font-size="236" font-weight="600">V</text>
+  <text x="245" y="353" fill="#fff7ff" font-family="Georgia, 'Times New Roman', serif" font-size="236" font-weight="600">F</text>
+</svg>
