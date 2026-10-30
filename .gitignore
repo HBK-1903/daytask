@@ -4,3 +4,4 @@ dist/
 *.local
 .dev.vars
 .wrangler/
+.test-dist/

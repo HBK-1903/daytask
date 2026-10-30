@@ -7,6 +7,8 @@ import './polish.css'
 import './planner.css'
 import './features.css'
 import './backlog.css'
+import './roadmap.css'
+import './review-habits.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode><App /></React.StrictMode>,
