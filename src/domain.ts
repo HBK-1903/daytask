@@ -1,5 +1,10 @@
 export type HabitWeekMetrics = { checkCount: number; target: number; progress: number }
 
+export function isHabitScheduledOnWeekday(frequencyMode: 'weekly' | 'selectedDays' | undefined, scheduledDays: number[] | undefined, weekday: number): boolean {
+  if (frequencyMode !== 'selectedDays' || !scheduledDays?.length) return true
+  return scheduledDays.includes(weekday)
+}
+
 export function getHabitWeekMetrics(checkDates: string[], weeklyTarget: number, weekKeys: string[]): HabitWeekMetrics {
   const includedDays = new Set(weekKeys)
   const checkCount = new Set(checkDates.filter((date) => includedDays.has(date))).size

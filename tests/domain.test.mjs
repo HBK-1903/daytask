@@ -1,6 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { getElapsedSeconds, getHabitWeekMetrics, getReminderSyncFailure, getSnoozeDate, isTaskCountableForAnalytics } from '../.test-dist/domain.js'
+import { getElapsedSeconds, getHabitWeekMetrics, isHabitScheduledOnWeekday, getReminderSyncFailure, getSnoozeDate, isTaskCountableForAnalytics } from '../.test-dist/domain.js'
+
+test('weekday-specific habits only count toward the selected weekdays while legacy weekly habits remain eligible', () => {
+  assert.equal(isHabitScheduledOnWeekday('selectedDays', [1, 3, 5], 3), true)
+  assert.equal(isHabitScheduledOnWeekday('selectedDays', [1, 3, 5], 4), false)
+  assert.equal(isHabitScheduledOnWeekday(undefined, undefined, 4), true)
+  assert.equal(isHabitScheduledOnWeekday('weekly', undefined, 4), true)
+})
 
 test('weekly habit progress is derived from unique check dates and its own target', () => {
   const result = getHabitWeekMetrics(['2026-10-26', '2026-10-26', '2026-10-28', '2026-10-20'], 4, ['2026-10-26', '2026-10-27', '2026-10-28'])
