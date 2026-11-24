@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getElapsedSeconds, getHabitCalendarState, getHabitWeekMetrics, getReminderSyncFailure, getSnoozeDate, isHabitScheduledOnWeekday, isTaskCountableForAnalytics } from './domain'
 import { parseQuickTaskInput } from './quickAdd'
+import { isSessionExpiredLocally } from './session'
 import {
   AlarmClock, ArrowRight, ArrowDownToLine, Upload, Bell, BookOpen, CalendarDays,
   Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3,
@@ -301,6 +302,12 @@ function App() {
   useEffect(() => { localStorage.setItem('vf-account-email', JSON.stringify(accountEmail)) }, [accountEmail])
   useEffect(() => {
     if (!syncToken) { setAuthGateState('required'); return }
+    if (isSessionExpiredLocally(syncToken)) {
+      setSyncToken('')
+      setAuthGateState('required')
+      setAccountGateMessage('Oturum süren dolmuş. Yeniden giriş yap; bu cihazdaki yerel planların silinmez.')
+      return
+    }
     setAuthGateState('ready')
     void refreshAccountSession(syncToken)
   }, [])

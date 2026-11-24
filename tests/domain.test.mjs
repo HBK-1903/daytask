@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { getElapsedSeconds, getHabitCalendarState, getHabitWeekMetrics, isHabitScheduledOnWeekday, getReminderSyncFailure, getSnoozeDate, isTaskCountableForAnalytics } from '../.test-dist/domain.js'
 import { parseQuickTaskInput } from '../.test-dist/quickAdd.js'
+import { getSessionExpiryMs, isSessionExpiredLocally } from '../.test-dist/session.js'
 
 test('habit calendar separates completed, planned-missed, today, upcoming, and off-schedule dates', () => {
   assert.equal(getHabitCalendarState('2026-10-26', '2026-10-30', true, 'selectedDays', [1, 3, 5]), 'completed')
@@ -27,6 +28,16 @@ test('weekly habit progress is derived from unique check dates and its own targe
 test('habit progress is capped and invalid targets use a safe default', () => {
   assert.deepEqual(getHabitWeekMetrics(['2026-10-26', '2026-10-27'], 1, ['2026-10-26', '2026-10-27']), { checkCount: 2, target: 1, progress: 100 })
   assert.deepEqual(getHabitWeekMetrics([], 0, []), { checkCount: 0, target: 7, progress: 0 })
+})
+
+test('local session expiry check handles valid, expired, and malformed JWT payloads', () => {
+  const now = 1_800_000_000_000
+  const token = `header.${btoa(JSON.stringify({ exp: Math.floor(now / 1000) + 60 }))}.signature`
+  assert.equal(getSessionExpiryMs(token), now + 60_000)
+  assert.equal(isSessionExpiredLocally(token, now), false)
+  assert.equal(isSessionExpiredLocally(`header.${btoa(JSON.stringify({ exp: Math.floor(now / 1000) }))}.signature`, now), true)
+  assert.equal(getSessionExpiryMs('not-a-jwt'), null)
+  assert.equal(isSessionExpiredLocally('not-a-jwt', now), true)
 })
 
 test('quick task capture parses Turkish relative dates and clock times without moving an unmentioned date', () => {
