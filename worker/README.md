@@ -42,7 +42,7 @@ npm install
 npx wrangler deploy
 ```
 
-The API will be available at the Worker's `workers.dev` URL. A Cron Trigger is configured to run every minute and dispatch due reminders. Workers Builds can deploy this folder from the same GitHub repository: connect `HBK-1903/daytask`, set **Root directory** to `/worker`, leave **Build command** empty, use **Deploy command** `npx wrangler deploy`, and keep `main` as the production branch. Enable preview builds only after pushing a branch with the Worker configuration.
+The API will be available at the Worker's `workers.dev` URL. Keep `APP_API_ORIGIN` in `wrangler.jsonc` set to that exact HTTPS origin: it is embedded in notification-action payloads so one-tap capabilities are never sent to a host supplied by a task-sync request. A Cron Trigger is configured to run every minute and dispatch due reminders. Workers Builds can deploy this folder from the same GitHub repository: connect `HBK-1903/daytask`, set **Root directory** to `/worker`, leave **Build command** empty, use **Deploy command** `npx wrangler deploy`, and keep `main` as the production branch. Enable preview builds only after pushing a branch with the Worker configuration.
 
 ## API
 

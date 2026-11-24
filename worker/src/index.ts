@@ -4,6 +4,7 @@ import { constantTimeEqual, generateRecoveryCode, hashCredential, incrementRateL
 interface Env {
   hbkd1: D1Database
   APP_ORIGIN: string
+  APP_API_ORIGIN: string
   APP_PASSWORD: string
   SESSION_SECRET: string
   VAPID_SUBJECT: string
@@ -359,7 +360,13 @@ async function route(request: Request, env: Env): Promise<Response> {
     const current = await env.hbkd1.prepare('SELECT due_at AS dueAt, status, action_nonce AS actionNonce FROM tasks WHERE id = ?').bind(payload.id).first<{ dueAt: number; status: string; actionNonce: string | null }>()
     const scheduleChanged = !current || current.dueAt !== payload.dueAt || current.status !== status
     const actionNonce = scheduleChanged || !current?.actionNonce ? createActionNonce() : current.actionNonce
-    const actionApiUrl = new URL(request.url).origin
+    let actionApiUrl = ''
+    try {
+      const configuredApiOrigin = new URL(env.APP_API_ORIGIN)
+      if (configuredApiOrigin.protocol === 'https:' || (configuredApiOrigin.hostname === 'localhost' && configuredApiOrigin.protocol === 'http:')) {
+        actionApiUrl = configuredApiOrigin.origin
+      }
+    } catch { /* Push notifications remain usable without one-tap server actions. */ }
     const privacy = await env.hbkd1.prepare('SELECT privacy_mode AS privacyMode FROM reminder_settings WHERE owner = ?').bind('owner').first<{ privacyMode: number }>()
     const storedTitle = privacy?.privacyMode !== 0 ? 'Görev zamanı.' : payload.title.trim()
     const storedCategory = privacy?.privacyMode !== 0 ? 'Kişisel' : payload.category ?? 'Kişisel'
@@ -453,8 +460,9 @@ async function processDueReminders(env: Env): Promise<void> {
 
   for (const task of dueTasks.results) {
     // Claim each due task before sending so overlapping cron runs cannot duplicate a reminder.
-    const actionNonce = task.actionNonce ?? createActionNonce()
-    const claim = await env.hbkd1.prepare(`UPDATE tasks SET next_reminder_at = ?, reminder_count = reminder_count + 1, updated_at = ?, action_nonce = COALESCE(action_nonce, ?)
+    // Rotate the capability for each reminder so old notifications cannot keep acting later.
+    const actionNonce = createActionNonce()
+    const claim = await env.hbkd1.prepare(`UPDATE tasks SET next_reminder_at = ?, reminder_count = reminder_count + 1, updated_at = ?, action_nonce = ?
       WHERE id = ? AND status = 'pending' AND next_reminder_at <= ?`)
       .bind(now + task.intervalMinutes * 60_000, now, actionNonce, task.id, now).run()
     if (!claim.meta.changes) continue
