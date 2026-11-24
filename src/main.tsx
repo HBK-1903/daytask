@@ -12,6 +12,7 @@ import './review-habits.css'
 import './account.css'
 import './notifications.css'
 import './quick-add.css'
+import './day-planner.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode><App /></React.StrictMode>,

@@ -38,6 +38,10 @@ Uygulamanın **Ayarlar → Kestirmeler** bölümündeki düğmeler tam adresi pa
 
 Worker API, D1 ve gerekli gizli değerler yapılandırılıp dağıtılmadıkça eşitleme etkinleştirilemez. Kurulum adımları `worker/README.md` içindedir. Kod değişikliği tek başına canlı servisi dağıtmaz veya herhangi bir veriyi buluta göndermez.
 
+## Gün planı görünümü
+
+Ana ekrandaki zaman akışı artık tüm bugünkü görevleri genişletebilir ve **Tümü / Açık / Tamamlanan** görünümleri arasında geçiş yapar. Her satırdan görevi tamamlayabilir, yeniden açabilir veya düzenleyebilirsin. İlk tamamlanmamış görevin saati geçtiyse bu plan otomatik değiştirilmez; görev günlük gözden geçirmede kalır. 6,1 inç telefon ekranında metin ve dokunma hedefleri daha rahat okunacak/erişilecek ölçülere çıkarılır; küçük ekranlar için daraltılmış düzen de korunur.
+
 ## Hızlı görev yakalama
 
 Ana ekrandaki **Hızlı ekle** alanı ve `N` kısayolu, akıldaki işi ayrıntılı planlama adımına girmeden yakalar. Türkçe “bugün”, “yarın”, “öbür gün”, hafta günü ve `14:30` / “saat 14” biçimlerini yorumlar. Görev kaydedilmeden önce başlık, tarih ve saat önizlemesi gösterilir; ifade anlaşılmadığında varsayılan bugün 18:00 kullanılır. `/` kısayolu görev aramasını açar. Tarih yorumu kullanıcı onayı olmadan görev oluşturmaz ve diğer görevleri taşımaz.
