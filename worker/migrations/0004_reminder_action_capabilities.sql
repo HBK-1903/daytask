@@ -1,0 +1,2 @@
+ALTER TABLE tasks ADD COLUMN action_nonce TEXT;
+ALTER TABLE tasks ADD COLUMN action_api_url TEXT NOT NULL DEFAULT '';

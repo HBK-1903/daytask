@@ -33,7 +33,7 @@ npx wrangler secret put SESSION_SECRET
 npx wrangler secret put VAPID_PRIVATE_KEY
 ```
 
-Use a long, unique app password and a random `SESSION_SECRET` of at least 32 characters. The app password is exchanged for a short-lived signed session; it is not a static token embedded in the frontend.
+Use a long, unique `APP_PASSWORD` and a random `SESSION_SECRET` of at least 32 characters. `APP_PASSWORD` is required once to create the single personal account; after setup, sign in with the account email and password. The account password is salted and hashed in D1. The account's 256-bit recovery code is shown once, stored only as a salted hash, and rotated after recovery. The email is an unverified login identifier: no email is sent. Keep `APP_PASSWORD` private; it is not embedded in the frontend.
 
 ### 3. Deploy
 
@@ -42,14 +42,19 @@ npm install
 npx wrangler deploy
 ```
 
-The API will be available at the Worker's `workers.dev` URL. A Cron Trigger is configured to run every minute and dispatch due reminders. Workers Builds can deploy this folder from the same GitHub repository: connect `HBK-1903/daytask`, set **Root directory** to `/worker`, leave **Build command** empty, use **Deploy command** `npx wrangler deploy`, and keep `main` as the production branch. Enable preview builds only after pushing a branch with the Worker configuration.
+The API will be available at the Worker's `workers.dev` URL. Keep `APP_API_ORIGIN` in `wrangler.jsonc` set to that exact HTTPS origin: it is embedded in notification-action payloads so one-tap capabilities are never sent to a host supplied by a task-sync request. A Cron Trigger is configured to run every minute and dispatch due reminders. Workers Builds can deploy this folder from the same GitHub repository: connect `HBK-1903/daytask`, set **Root directory** to `/worker`, leave **Build command** empty, use **Deploy command** `npx wrangler deploy`, and keep `main` as the production branch. Enable preview builds only after pushing a branch with the Worker configuration.
 
 ## API
 
 - `GET /api/health` — health check
-- `POST /api/auth/session` — exchange `{ "password": "..." }` for a seven-day bearer session
+- `POST /api/auth/register` — one-time personal account setup with email, account password, and `APP_PASSWORD` setup key; returns a seven-day session and a one-time recovery code
+- `POST /api/auth/login` — sign in with email and account password
+- `POST /api/auth/recover` — reset the account password with the offline recovery code; rotates the code and revokes old sessions
+- `POST /api/auth/session` — legacy `APP_PASSWORD` session exchange before an account is created; disabled after account setup
 - `GET /api/push/public-key` — public VAPID key for browser subscription
 - `POST /api/push/subscribe` / `DELETE /api/push/subscribe` — save/remove a push subscription (authenticated)
+- `POST /api/push/test` — send an explicitly requested test push to active subscriptions (authenticated)
+- `POST /api/reminders/action` — apply a one-use HMAC-capability action from a notification (complete, snooze 10 minutes, dismiss); no account token is embedded in the notification
 - `GET /api/tasks`, `POST /api/tasks`, `PATCH /api/tasks/:id` — reminder task API (authenticated)
 
 The API requires an exact allowed origin and authenticated sessions for private routes. CORS is not a substitute for authentication. Push delivery is best-effort; browser and operating-system behavior can delay or suppress notifications.
@@ -59,7 +64,7 @@ Additional routes:
 - `GET /api/sync` and `PUT /api/sync` — retrieve/store one encrypted personal backup envelope (authenticated). The browser encrypts with PBKDF2-SHA-256 and AES-GCM before upload; D1 stores only `salt`, `iv`, and ciphertext. The sync passphrase is never sent to this Worker. Each explicit upload replaces the previous cloud envelope; there is no record-level merge or automatic/background sync.
 - `GET /api/reminders/settings` and `PUT /api/reminders/settings` — store quiet-hour, wording, and lock-screen privacy choices (authenticated). Quiet hours use `Europe/Istanbul`.
 
-Migration `0002_sync_and_reminder_settings.sql` adds the encrypted vault and reminder settings tables. It must be applied to the existing `hbkdaytask` database before these routes can work:
+Migration `0002_sync_and_reminder_settings.sql` adds the encrypted vault and reminder settings tables; migration `0003_personal_account_auth.sql` adds the one-account credential and rate-limit tables; migration `0004_reminder_action_capabilities.sql` adds one-use push-action capabilities. All pending migrations must be applied to the existing `hbkdaytask` database before their routes can work. Do not apply these remotely until the target database is reviewed and the owner explicitly approves the live migration:
 
 ```bash
 npx wrangler d1 migrations apply hbkdaytask --remote
@@ -69,4 +74,4 @@ The encrypted backup vault receives data only after the user opens Settings, aut
 
 ## Local development
 
-Create `.dev.vars` in this folder (never commit it) with `APP_PASSWORD`, `SESSION_SECRET`, `VAPID_SUBJECT`, `VAPID_PUBLIC_KEY`, and `VAPID_PRIVATE_KEY`. Use `npm run dev` and Wrangler's local D1 database for local work. See `.gitignore` for local-secret exclusions.
+Create `.dev.vars` in this folder (never commit it) with `APP_PASSWORD`, `SESSION_SECRET`, `VAPID_SUBJECT`, `VAPID_PUBLIC_KEY`, and `VAPID_PRIVATE_KEY`. Use `npm run dev` and Wrangler's local D1 database for local work. Run `npm run typecheck` and `npm test` from `worker/` before pushing. See `.gitignore` for local-secret exclusions.

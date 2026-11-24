@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { getElapsedSeconds, getHabitCalendarState, getHabitWeekMetrics, isHabitScheduledOnWeekday, getReminderSyncFailure, getSnoozeDate, isTaskCountableForAnalytics } from '../.test-dist/domain.js'
+import { parseQuickTaskInput } from '../.test-dist/quickAdd.js'
 
 test('habit calendar separates completed, planned-missed, today, upcoming, and off-schedule dates', () => {
   assert.equal(getHabitCalendarState('2026-10-26', '2026-10-30', true, 'selectedDays', [1, 3, 5]), 'completed')
@@ -26,6 +27,20 @@ test('weekly habit progress is derived from unique check dates and its own targe
 test('habit progress is capped and invalid targets use a safe default', () => {
   assert.deepEqual(getHabitWeekMetrics(['2026-10-26', '2026-10-27'], 1, ['2026-10-26', '2026-10-27']), { checkCount: 2, target: 1, progress: 100 })
   assert.deepEqual(getHabitWeekMetrics([], 0, []), { checkCount: 0, target: 7, progress: 0 })
+})
+
+test('quick task capture parses Turkish relative dates and clock times without moving an unmentioned date', () => {
+  const base = new Date(2026, 9, 30, 9, 0)
+  assert.deepEqual(parseQuickTaskInput('Yarın saat 14:30 İngilizce tekrar', base), {
+    title: 'İngilizce tekrar', date: '2026-10-31', time: '14:30', hasDate: true, hasTime: true,
+  })
+  assert.deepEqual(parseQuickTaskInput('Cumartesi 9:15 kısa yürüyüş', base), {
+    title: 'kısa yürüyüş', date: '2026-10-31', time: '09:15', hasDate: true, hasTime: true,
+  })
+  assert.deepEqual(parseQuickTaskInput('Raporu hazırla', base), {
+    title: 'Raporu hazırla', date: '2026-10-30', time: '18:00', hasDate: false, hasTime: false,
+  })
+  assert.equal(parseQuickTaskInput('31.02 25:80 bozuk tarih', base).title, '31.02 25:80 bozuk tarih')
 })
 
 test('snooze starts from the current time and crosses midnight correctly', () => {

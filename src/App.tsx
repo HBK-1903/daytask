@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getElapsedSeconds, getHabitCalendarState, getHabitWeekMetrics, getReminderSyncFailure, getSnoozeDate, isHabitScheduledOnWeekday, isTaskCountableForAnalytics } from './domain'
+import { parseQuickTaskInput } from './quickAdd'
 import {
   AlarmClock, ArrowRight, ArrowDownToLine, Upload, Bell, BookOpen, CalendarDays,
   Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, Clock3,
@@ -160,6 +161,8 @@ function App() {
   const timerSegmentBaseSecondsRef = useRef(0)
   const pomodoroSegmentBaseSecondsRef = useRef(0)
   const [modalOpen, setModalOpen] = useState(false)
+  const [quickCaptureOpen, setQuickCaptureOpen] = useState(false)
+  const [quickCaptureText, setQuickCaptureText] = useState('')
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [undoAction, setUndoAction] = useState<UndoAction | null>(null)
   const [habitModalOpen, setHabitModalOpen] = useState(false)
@@ -168,6 +171,8 @@ function App() {
   const [habitSelectedDays, setHabitSelectedDays] = useState<number[]>([])
   const [habitCalendarId, setHabitCalendarId] = useState<number | 'all'>('all')
   const [overdueReviewExpanded, setOverdueReviewExpanded] = useState(false)
+  const [todayAgendaFilter, setTodayAgendaFilter] = useState<'all' | 'open' | 'done'>('all')
+  const [showAllTodayTasks, setShowAllTodayTasks] = useState(false)
   const [clockNow, setClockNow] = useState(() => Date.now())
   const [studyLogModalOpen, setStudyLogModalOpen] = useState(false)
   const [goalModalOpen, setGoalModalOpen] = useState(false)
@@ -204,6 +209,7 @@ function App() {
   const [pendingMove, setPendingMove] = useState<PendingMove | null>(null)
   const [draggingTaskId, setDraggingTaskId] = useState<number | null>(null)
   const [remindersOn, setRemindersOn] = useState(() => readStored('vf-reminders-enabled', false))
+  const [notificationPermission, setNotificationPermission] = useState<'unsupported' | NotificationPermission>(() => typeof Notification === 'undefined' ? 'unsupported' : Notification.permission)
   const [reminderSyncState, setReminderSyncState] = useState<'idle' | 'syncing' | 'synced' | 'error'>('idle')
   const [reminderSyncError, setReminderSyncError] = useState('')
   const [reminderSyncAttempt, setReminderSyncAttempt] = useState(0)
@@ -217,6 +223,13 @@ function App() {
   const [syncApiUrl, setSyncApiUrl] = useState(() => readStored('vf-sync-api', 'https://daytask.hasanbekirk02.workers.dev'))
   const [syncToken, setSyncToken] = useState(() => readStored('vf-sync-token', ''))
   const [syncPassword, setSyncPassword] = useState('')
+  const [accountEmail, setAccountEmail] = useState('')
+  const [accountMode, setAccountMode] = useState<'login' | 'register' | 'recover'>('login')
+  const [accountSetupKey, setAccountSetupKey] = useState('')
+  const [accountRecoveryCodeInput, setAccountRecoveryCodeInput] = useState('')
+  const [accountNewPassword, setAccountNewPassword] = useState('')
+  const [pendingRecoveryCode, setPendingRecoveryCode] = useState('')
+  const [recoveryCodeSaved, setRecoveryCodeSaved] = useState(false)
   const [syncPassphrase, setSyncPassphrase] = useState('')
   const [syncStatus, setSyncStatus] = useState('')
   const [quietStart, setQuietStart] = useState('22:00')
@@ -230,17 +243,51 @@ function App() {
     const params = new URLSearchParams(window.location.search)
     const action = params.get('action')
     const reminderTaskId = params.get('reminderTask')
+    const reminderAction = params.get('reminderAction')
+    const reminderDueAt = Number(params.get('reminderDueAt'))
+    const actionFailed = params.get('reminderActionFailed') === '1'
     if (action === 'add-task') openNewTaskModal()
     else if (action === 'calendar') setActiveTab('Takvim')
     else if (action === 'start-focus') { setActiveTab('Şimdi'); setTimerPhase('focus'); setSeconds(0); setPomodoroElapsed(0); timerSegmentBaseSecondsRef.current = 0; pomodoroSegmentBaseSecondsRef.current = 0; timerSegmentStartedAtRef.current = Date.now(); setTimerRunning(true) }
     else if (reminderTaskId) {
       const task = tasks.find((item) => String(item.id) === reminderTaskId)
-      setActiveTab('Takvim')
-      if (task) { setSelectedDay(task.date ?? todayKey); setCalendarAnchor(task.date ?? todayKey) }
-      else setToast('Hatırlatmanın görevi bu cihazda bulunamadı; eşitleme durumunu kontrol et.')
+      if (task && reminderAction === 'complete') {
+        setTasks((items) => items.map((item) => item.id === task.id ? { ...item, done: true, completedAt: Date.now() } : item))
+        setActiveTab('Şimdi')
+        setToast(actionFailed ? 'Görev bu cihazda tamamlandı. Sunucu eşitlemesi yeniden denenecek.' : 'Görev bildirimden tamamlandı.')
+      } else if (task && reminderAction === 'dismiss') {
+        setTasks((items) => items.map((item) => item.id === task.id ? { ...item, archived: true } : item))
+        setActiveTab('Şimdi')
+        setToast(actionFailed ? 'Görev bu cihazda arşivlendi. Sunucu eşitlemesi yeniden denenecek.' : 'Hatırlatma kapatıldı; görev arşivlendi.')
+      } else if (task && reminderAction === 'snooze') {
+        const snoozedAt = Number.isFinite(reminderDueAt) && reminderDueAt > Date.now() ? new Date(reminderDueAt) : getSnoozeDate(new Date(), 10)
+        const time = `${String(snoozedAt.getHours()).padStart(2, '0')}:${String(snoozedAt.getMinutes()).padStart(2, '0')}`
+        const date = dateKey(snoozedAt)
+        setTasks((items) => items.map((item) => item.id === task.id ? { ...item, date, time } : item))
+        setActiveTab('Şimdi')
+        setToast(actionFailed ? 'Görev bu cihazda 10 dakika ertelendi. Sunucu eşitlemesi yeniden denenecek.' : 'Görev bildirimden 10 dakika ertelendi.')
+      } else if (task) {
+        setActiveTab('Takvim')
+        setSelectedDay(task.date ?? todayKey)
+        setCalendarAnchor(task.date ?? todayKey)
+      } else {
+        setToast('Hatırlatmanın görevi bu cihazda bulunamadı; eşitleme durumunu kontrol et.')
+      }
     }
     if (action || reminderTaskId) window.history.replaceState({}, '', window.location.pathname)
   }, [])
+  useEffect(() => {
+    const handleQuickKeys = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target as HTMLElement | null
+      if (target?.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target?.tagName ?? '')) return
+      if (modalOpen || quickCaptureOpen || searchOpen || settingsOpen || habitModalOpen) return
+      if (event.key.toLowerCase() === 'n') { event.preventDefault(); openQuickCapture() }
+      else if (event.key === '/') { event.preventDefault(); setSearchOpen(true) }
+    }
+    window.addEventListener('keydown', handleQuickKeys)
+    return () => window.removeEventListener('keydown', handleQuickKeys)
+  }, [modalOpen, quickCaptureOpen, searchOpen, settingsOpen, habitModalOpen])
   useEffect(() => { localStorage.setItem('vf-tasks', JSON.stringify(tasks)) }, [tasks])
   useEffect(() => { localStorage.setItem('vf-profile-name', JSON.stringify(profileName)) }, [profileName])
   useEffect(() => { if (profileAvatar) localStorage.setItem('vf-profile-avatar', JSON.stringify(profileAvatar)); else localStorage.removeItem('vf-profile-avatar') }, [profileAvatar])
@@ -251,8 +298,24 @@ function App() {
   useEffect(() => { localStorage.setItem('vf-sync-token', JSON.stringify(syncToken)) }, [syncToken])
   useEffect(() => { localStorage.setItem('vf-reminders-enabled', JSON.stringify(remindersOn)) }, [remindersOn])
   useEffect(() => {
-    if (!('serviceWorker' in navigator)) { setRemindersOn(false); return }
-    navigator.serviceWorker.ready.then((registration) => registration.pushManager.getSubscription()).then((subscription) => setRemindersOn(Boolean(subscription))).catch(() => setRemindersOn(false))
+    const refreshPushState = async () => {
+      if (typeof Notification === 'undefined' || !('serviceWorker' in navigator)) {
+        setNotificationPermission('unsupported')
+        setRemindersOn(false)
+        return
+      }
+      setNotificationPermission(Notification.permission)
+      try {
+        const registration = await navigator.serviceWorker.ready
+        const subscription = await registration.pushManager.getSubscription()
+        setRemindersOn(Boolean(subscription))
+      } catch {
+        setRemindersOn(false)
+      }
+    }
+    void refreshPushState()
+    document.addEventListener('visibilitychange', refreshPushState)
+    return () => document.removeEventListener('visibilitychange', refreshPushState)
   }, [])
   useEffect(() => {
     if (!settingsOpen || !syncToken) return
@@ -345,6 +408,9 @@ function App() {
   const overdueTasks = tasks.filter((task) => !task.archived && !task.done && new Date(`${task.date ?? todayKey}T${task.time}:00`).getTime() < now.getTime()).sort((a, b) => (a.date ?? todayKey).localeCompare(b.date ?? todayKey) || a.time.localeCompare(b.time))
   const todayTasks = useMemo(() => tasks.filter((task) => !task.archived && (task.date ?? todayKey) === todayKey), [tasks, todayKey])
   const scheduledNextTask = useMemo(() => todayTasks.filter((task) => !task.done).sort((a, b) => a.time.localeCompare(b.time))[0], [todayTasks])
+  const agendaTasks = todayTasks.filter((task) => todayAgendaFilter === 'all' || (todayAgendaFilter === 'open' ? !task.done : task.done)).sort((a, b) => a.time.localeCompare(b.time))
+  const visibleAgendaTasks = showAllTodayTasks ? agendaTasks : agendaTasks.slice(0, 4)
+  const nextScheduledId = scheduledNextTask?.id
   const selectedFocusTask = todayTasks.find((task) => task.id === focusTaskId && !task.done)
   const nextTask = selectedFocusTask ?? scheduledNextTask
   const doneCount = todayTasks.filter((task) => task.done).length
@@ -617,6 +683,21 @@ function App() {
     setHabits((items) => items.filter((habit) => !habit.isExample))
     setToast('Başlangıç örnekleri kaldırıldı.')
   }
+  function openQuickCapture() {
+    setQuickCaptureText('')
+    setQuickCaptureOpen(true)
+  }
+  function commitQuickCapture(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const draft = parseQuickTaskInput(quickCaptureText, now)
+    if (!draft.title) { setToast('Görev adını yaz; tarih ve saat seçimi isteğe bağlıdır.'); return }
+    const category = activeTab === 'Öğrenme' ? 'Öğrenme' : 'Kişisel'
+    const color = category === 'Öğrenme' ? 'violet' : 'peach'
+    const icon = category === 'Öğrenme' ? 'book' : 'target'
+    setTasks((items) => [...items, { id: Date.now(), title: draft.title, category, time: draft.time, date: draft.date, duration: 30, done: false, color, icon, priority: 'normal', energy: 'steady', createdAt: Date.now() }])
+    setQuickCaptureOpen(false)
+    setToast(`Görev ${draft.hasDate || draft.hasTime ? `${draft.date === todayKey ? 'bugün' : new Intl.DateTimeFormat('tr-TR', { day: 'numeric', month: 'short' }).format(new Date(`${draft.date}T12:00:00`))} · ${draft.time} için` : 'bugün 18:00 için'} eklendi. Tarih/saat değişmedi.`)
+  }
   function openNewTaskModal() {
     setEditingTask(null)
     setTaskName('')
@@ -882,11 +963,12 @@ function App() {
     closeTaskModal()
   }
   async function enableTaskReminders() {
-    if (!syncToken) { setSyncStatus('Önce Worker oturumunu aç.'); return }
-    if (!('Notification' in window) || !('serviceWorker' in navigator)) { setSyncStatus('Bu tarayıcı Web Push bildirimlerini desteklemiyor.'); return }
+    if (!syncToken) { setSyncStatus('Önce kişisel hesabınla giriş yap.'); return }
+    if (typeof Notification === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) { setSyncStatus('Bu tarayıcı Web Push bildirimlerini desteklemiyor.'); return }
     try {
       const permission = await Notification.requestPermission()
-      if (permission !== 'granted') throw new Error('Bildirim izni verilmedi.')
+      setNotificationPermission(permission)
+      if (permission !== 'granted') throw new Error(permission === 'denied' ? 'Bildirim izni tarayıcı ayarlarında kapalı. Site izinlerini açıp yeniden dene.' : 'Bildirim izni verilmedi.')
       const keyResponse = await fetch(`${syncApiUrl}/api/push/public-key`)
       const keyResult = await keyResponse.json() as { publicKey?: string; error?: string }
       if (!keyResponse.ok || !keyResult.publicKey) throw new Error(keyResult.error ?? 'Push anahtarı henüz yapılandırılmamış.')
@@ -900,6 +982,17 @@ function App() {
       setSyncStatus('Hatırlatmalar etkin. Görev saati ve beş dakikalık tekrarlar sunucu tarafından gönderilir; teslimat OS/tarayıcıya bağlıdır.')
     } catch (error) { setSyncStatus(error instanceof Error ? error.message : 'Hatırlatmalar etkinleştirilemedi.') }
   }
+  async function testPushNotification() {
+    if (notificationPermission !== 'granted') { setSyncStatus('Test için tarayıcı bildirim izni açık olmalı.'); return }
+    if (!syncToken || !remindersOn) { setSyncStatus('Test bildirimi için önce bu cihazda hatırlatmaları etkinleştir.'); return }
+    try {
+      const response = await fetch(`${syncApiUrl}/api/push/test`, { method: 'POST', headers: { authorization: `Bearer ${syncToken}` } })
+      const result = await response.json() as { sent?: number; failed?: number; expired?: number; error?: string }
+      if (response.status === 401) setSyncToken('')
+      if (!response.ok) throw new Error(result.error ?? `Test bildirimi gönderilemedi (HTTP ${response.status}).`)
+      setSyncStatus(`Test push Worker'a iletildi (${result.sent ?? 0} abonelik). Cihaz teslimatı OS/tarayıcıya bağlıdır.`)
+    } catch (error) { setSyncStatus(error instanceof Error ? error.message : 'Test bildirimi gönderilemedi.') }
+  }
   async function saveReminderPreferences(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!syncToken) { setSyncStatus('Hatırlatma tercihlerini kaydetmek için Worker oturumu aç.'); return }
@@ -912,14 +1005,22 @@ function App() {
     } catch (error) { setSyncStatus(error instanceof Error ? error.message : 'Tercihler kaydedilemedi.') }
   }
   async function disableTaskReminders() {
+    let serverCleanup = false
     try {
       const registration = await navigator.serviceWorker.ready
       const subscription = await registration.pushManager.getSubscription()
-      if (subscription && syncToken) await fetch(`${syncApiUrl}/api/push/subscribe`, { method: 'DELETE', headers: { 'content-type': 'application/json', authorization: `Bearer ${syncToken}` }, body: JSON.stringify({ endpoint: subscription.endpoint }) })
+      if (subscription && syncToken) {
+        const response = await fetch(`${syncApiUrl}/api/push/subscribe`, { method: 'DELETE', headers: { 'content-type': 'application/json', authorization: `Bearer ${syncToken}` }, body: JSON.stringify({ endpoint: subscription.endpoint }) })
+        serverCleanup = response.ok
+      }
       await subscription?.unsubscribe()
       setRemindersOn(false)
-      setSyncStatus('Bu cihazdaki hatırlatmalar kapatıldı. Sunucu başka aboneliklere göndermeye devam edebilir.')
-    } catch { setSyncStatus('Hatırlatmalar kapatılamadı; bağlantıyı kontrol et.') }
+      setSyncStatus(serverCleanup ? 'Bu cihazdaki hatırlatmalar kapatıldı. Diğer cihazların abonelikleri etkilenmez.' : 'Bu cihazda kapatıldı; Worker aboneliği temizlenemediyse sonraki push hatasıyla silinebilir.')
+    } catch {
+      try { const registration = await navigator.serviceWorker.ready; await (await registration.pushManager.getSubscription())?.unsubscribe() } catch { /* local permission may already be revoked */ }
+      setRemindersOn(false)
+      setSyncStatus('Bu cihazdaki hatırlatmalar kapatıldı; Worker bağlantısı olmadığı için sunucu temizliği daha sonra yapılabilir.')
+    }
   }
   async function copyQuickLink(action: string) {
     const url = `${window.location.origin}/?action=${action}`
@@ -951,13 +1052,40 @@ function App() {
       const base = new URL(syncApiUrl.trim())
       if (base.protocol !== 'https:') throw new Error('Eşitleme adresi HTTPS olmalı.')
       setSyncApiUrl(base.origin)
-      const response = await fetch(`${base.origin}/api/auth/session`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: syncPassword }) })
-      const result = await response.json() as { token?: string; error?: string }
-      if (!response.ok || !result.token) throw new Error(result.error ?? 'Bağlantı kurulamadı.')
+      const path = accountMode === 'register' ? '/api/auth/register' : accountMode === 'recover' ? '/api/auth/recover' : '/api/auth/login'
+      const payload = accountMode === 'register'
+        ? { email: accountEmail, password: syncPassword, setupKey: accountSetupKey }
+        : accountMode === 'recover'
+          ? { email: accountEmail, recoveryCode: accountRecoveryCodeInput, newPassword: accountNewPassword }
+          : { email: accountEmail, password: syncPassword }
+      const response = await fetch(`${base.origin}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })
+      const result = await response.json() as { token?: string; email?: string; recoveryCode?: string; error?: string }
+      if (!response.ok || !result.token) throw new Error(result.error ?? 'Hesap bağlantısı kurulamadı.')
       setSyncToken(result.token)
+      setAccountEmail(result.email ?? accountEmail.trim())
       setSyncPassword('')
-      setSyncStatus('Güvenli oturum açıldı. Veriler henüz gönderilmedi.')
-    } catch (error) { setSyncStatus(error instanceof Error ? error.message : 'Bağlantı kurulamadı.') }
+      setAccountSetupKey('')
+      setAccountRecoveryCodeInput('')
+      setAccountNewPassword('')
+      setSyncStatus(result.recoveryCode ? 'Hesap hazır. Kurtarma kodunu şimdi güvenli bir yere kaydet.' : 'Hesap oturumu açıldı. Planlar eşitleme onayın olmadan gönderilmez.')
+      if (result.recoveryCode) { setPendingRecoveryCode(result.recoveryCode); setRecoveryCodeSaved(false) }
+      setAccountMode('login')
+    } catch (error) { setSyncStatus(error instanceof Error ? error.message : 'Hesap bağlantısı kurulamadı.') }
+  }
+  async function copyAccountRecoveryCode() {
+    if (!pendingRecoveryCode) return
+    try { await navigator.clipboard.writeText(pendingRecoveryCode); setSyncStatus('Kurtarma kodu kopyalandı. Güvenli bir yere kaydet.') }
+    catch { setSyncStatus('Kopyalama desteklenmiyor; kodu elle güvenli bir yere kaydet.') }
+  }
+  function downloadAccountRecoveryCode() {
+    if (!pendingRecoveryCode) return
+    const blob = new Blob([`Violet Focus kurtarma kodu\n\n${pendingRecoveryCode}\n\nBu kodu gizli ve güvenli bir yerde sakla. Parolanı sıfırlayınca tek kullanımlık yeni bir kod verilir.\n`], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = 'violet-focus-kurtarma-kodu.txt'
+    anchor.click()
+    URL.revokeObjectURL(url)
   }
   async function uploadEncryptedSync() {
     if (!syncToken || syncPassphrase.length < 12) { setSyncStatus('Eşitleme parolası en az 12 karakter olmalı.'); return }
@@ -1047,7 +1175,7 @@ function App() {
         {hasExampleData && <div className="example-data-banner"><span className="example-badge"><Sparkles size={14} /></span><p><b>Başlangıç örnek verileri</b><span> Görev ve alışkanlık örnekleri analizlere dahil. Dilediğinde kaldırabilirsin.</span></p><button onClick={removeExampleData}>Örnekleri kaldır</button></div>}
 
         {activeTab === 'Şimdi' && <section className="page-content">
-          <div className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> {dateUpper} <span className="eyebrow-spark">✦</span></div><h1>Şimdi ne <em>yapmalıyım?</em></h1><p className="welcome-copy">Sıradaki görevini ve bugünkü planını burada görebilirsin.</p></div><button className="add-task-button" onClick={openNewTaskModal}><Plus size={17} /> Görev ekle</button></div>
+          <div className="welcome-row"><div><div className="eyebrow"><span className="eyebrow-line" /> {dateUpper} <span className="eyebrow-spark">✦</span></div><h1>Şimdi ne <em>yapmalıyım?</em></h1><p className="welcome-copy">Sıradaki görevini ve bugünkü planını burada görebilirsin.</p></div><div className="welcome-actions"><button className="secondary-action-button quick-capture-trigger" onClick={openQuickCapture}><Zap size={15} /> Hızlı ekle <kbd>N</kbd></button><button className="add-task-button" onClick={openNewTaskModal}><Plus size={17} /> Planlı görev</button></div></div>
 
           <div className="daily-snapshot" aria-label="Bugünün verileri">
             <article className="snapshot-card snapshot-plan"><span className="snapshot-icon"><CalendarDays size={17} /></span><div><small>BUGÜNÜN PLANI</small><b>{todayTasks.length}<span> görev</span></b><p>{plannedMinutes} dk planlandı</p></div></article>
@@ -1075,13 +1203,16 @@ function App() {
               </section>
 
               <section className="schedule-section">
-                <div className="section-heading"><div><span className="section-kicker">BUGÜNÜN AKIŞI</span><h3>Günün planı <span className="heading-count">{todayTasks.length} görev</span></h3></div><button className="text-button" onClick={() => setActiveTab('Takvim')}>Tüm takvim <ArrowRight size={15} /></button></div>
+                <div className="section-heading"><div><span className="section-kicker">BUGÜNÜN AKIŞI</span><h3>Günün planı <span className="heading-count">{todayTasks.length} görev · {doneCount} tamamlandı</span></h3></div><button className="text-button" onClick={() => setActiveTab('Takvim')}>Takvimi aç <ArrowRight size={15} /></button></div>
+                <div className="agenda-filter-row" role="group" aria-label="Günlük görev filtresi">{([{ key: 'all', label: `Tümü ${todayTasks.length}` }, { key: 'open', label: `Açık ${todayTasks.length - doneCount}` }, { key: 'done', label: `Tamamlanan ${doneCount}` }] as const).map((filter) => <button type="button" key={filter.key} className={todayAgendaFilter === filter.key ? 'selected' : ''} aria-pressed={todayAgendaFilter === filter.key} onClick={() => { setTodayAgendaFilter(filter.key); setShowAllTodayTasks(false) }}>{filter.label}</button>)}</div>
                 <div className="timeline-list">
-                  {todayTasks.slice(0, 4).map((task, index) => <div className={`timeline-row ${task.done ? 'is-done' : ''}`} key={task.id}>
-                    <div className="timeline-time">{task.time}</div><div className="timeline-track"><span className={`timeline-node ${task.done ? 'node-done' : index === 0 ? 'node-active' : ''}`}>{task.done ? <Check size={11} /> : null}</span>{index !== Math.min(todayTasks.length, 4) - 1 && <i className="timeline-line" />}</div>
-                    <div className={`timeline-task task-${task.color}`}><div className="timeline-task-main"><span className="timeline-task-icon">{task.icon === 'book' ? <BookOpen size={15} /> : task.icon === 'flower' ? <Flower2 size={15} /> : <Target size={15} />}</span><div><b>{task.title}</b><small>{task.category} <span>·</span> {task.duration} dk</small></div></div><span className={`task-state ${task.done ? 'state-done' : ''}`}>{task.done ? 'Tamamlandı' : index === 0 ? 'Sıradaki' : 'Planlandı'}</span></div>
+                  {visibleAgendaTasks.map((task, index) => <div className={`timeline-row ${task.done ? 'is-done' : ''}`} key={task.id}>
+                    <div className="timeline-time">{task.time}</div><div className="timeline-track"><span className={`timeline-node ${task.done ? 'node-done' : task.id === nextScheduledId ? 'node-active' : ''}`}>{task.done ? <Check size={11} /> : null}</span>{index !== visibleAgendaTasks.length - 1 && <i className="timeline-line" />}</div>
+                    <div className={`timeline-task task-${task.color}`}><div className="timeline-task-main"><span className="timeline-task-icon">{task.icon === 'book' ? <BookOpen size={15} /> : task.icon === 'flower' ? <Flower2 size={15} /> : <Target size={15} />}</span><div><b>{task.title}</b><small>{task.category} <span>·</span> {task.duration} dk</small></div></div><div className="timeline-task-end"><span className={`task-state ${task.done ? 'state-done' : ''}`}>{task.done ? 'Tamamlandı' : task.id === nextScheduledId ? 'Sıradaki' : 'Planlandı'}</span><button type="button" className={`timeline-task-check ${task.done ? 'checked' : ''}`} onClick={() => task.done ? setTasks((items) => items.map((item) => item.id === task.id ? { ...item, done: false, completedAt: undefined } : item)) : completeTask(task.id)} aria-label={task.done ? `${task.title} görevini yeniden aç` : `${task.title} görevini tamamla`} title={task.done ? 'Yeniden aç' : 'Tamamlandı'}>{task.done ? <Undo2 size={15} /> : <Check size={15} />}</button><button type="button" className="timeline-task-edit" onClick={() => openTaskEditor(task)} aria-label={`${task.title} görevini düzenle`} title="Düzenle"><Pencil size={14} /></button></div></div>
                   </div>)}
+                  {!visibleAgendaTasks.length && <div className="agenda-filter-empty">{todayAgendaFilter === 'done' ? 'Bugün tamamlanan görev yok.' : todayAgendaFilter === 'open' ? 'Bugün için açık görev kalmadı.' : 'Bugün için planlı görev yok.'}</div>}
                 </div>
+                {agendaTasks.length > 4 && <button className="agenda-expand-button" onClick={() => setShowAllTodayTasks((shown) => !shown)}>{showAllTodayTasks ? 'Daha az göster' : `${agendaTasks.length - 4} görevin daha tümünü göster`} <ChevronDown size={14} /></button>}
                 <button className="add-inline" onClick={openNewTaskModal}><Plus size={15} /> Gününe bir görev daha ekle</button>
               </section>
               <section className="smart-recommendations"><div className="recommendation-header"><span className="recommendation-art"><Sparkles size={18} /></span><div><span className="section-kicker">HIZLI SEÇİM</span><h3>Zamanına ve enerjine uygun bir görev</h3><p>Öneri seçmek takvimini değiştirmez; yalnızca odak kartını günceller.</p></div></div><div className="recommendation-controls"><div className="recommendation-control"><span>Ne kadar zamanın var?</span><div>{[15,30,45,60].map((minutes) => <button type="button" key={minutes} className={availableMinutes === minutes ? 'selected' : ''} aria-pressed={availableMinutes === minutes} onClick={() => setAvailableMinutes(minutes)}>{minutes} dk</button>)}</div></div><div className="recommendation-control"><span>Enerji düzeyin</span><div>{energyChoices.map(({ value, label }) => <button type="button" key={value} className={recommendationEnergy === value ? 'selected' : ''} aria-pressed={recommendationEnergy === value} onClick={() => setRecommendationEnergy(value)}>{label}</button>)}</div></div></div><div className="recommendation-results">{recommendedTasks.length ? recommendedTasks.map((task) => <article className="recommendation-task" key={task.id}><span className={`recommendation-task-icon tone-${availableCategories.find((item) => item.label === task.category)?.tone ?? 'lilac'}`}>{(() => { const Icon = availableCategories.find((item) => item.label === task.category)?.icon ?? Focus; return <Icon size={17} /> })()}</span><div><small>{task.category} · {task.duration} dk{task.priority === 'high' ? ' · Öncelikli' : ''}</small><b>{task.title}</b></div><button type="button" disabled={timerRunning} title={timerRunning ? 'Odak oturumu sürerken görev değiştirilemez.' : undefined} onClick={() => { setFocusTaskId(task.id); document.getElementById('focus-panel')?.scrollIntoView({ behavior: 'smooth', block: 'center' }) }}>Seç <ArrowRight size={14} /></button></article>) : <div className="recommendation-empty"><span><Clock3 size={17} /></span><p>Bu süre ve enerji seçimine uyan bugünkü görev yok. Filtreyi değiştirebilir veya kendin görev ekleyebilirsin.</p></div>}</div></section>
@@ -1138,8 +1269,10 @@ function App() {
       {profileOpen && <div className="modal-backdrop profile-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setProfileOpen(false) }}><form className="task-modal profile-modal profile-editor-modal" onSubmit={saveProfile} role="dialog" aria-modal="true" aria-labelledby="profile-title"><header className="profile-editor-header"><div><span className="section-kicker">KİŞİSEL ALANIN</span><h2 id="profile-title">Profilini özelleştir</h2><p>Görünüşünü ve ilerleme tercihlerini düzenle.</p></div><button type="button" className="icon-button" onClick={() => setProfileOpen(false)} aria-label="Kapat"><X size={19} /></button></header><section className="profile-identity-card"><div className={`profile-editor-avatar avatar-tone-${profileAvatarThemeDraft}`}>{profileAvatarDraft ? <img src={profileAvatarDraft} alt="Profil fotoğrafı önizlemesi" /> : profileNameDraft.trim().slice(0, 1).toLocaleUpperCase('tr-TR') || 'V'}<span className="profile-avatar-sparkle"><Sparkles size={13} /></span></div><div className="profile-identity-copy"><span className="section-kicker">VIOLET FOCUS ÜYESİ</span><h3>{profileNameDraft.trim() || 'Görünen adın'}</h3><p>Bu cihazdaki kişisel çalışma alanın</p><input ref={profileImageInputRef} className="visually-hidden-file" type="file" accept="image/jpeg,image/png,image/webp" onChange={handleProfileImageChange} /><div className="profile-photo-actions"><button type="button" className="profile-photo-button" onClick={() => profileImageInputRef.current?.click()}><Upload size={14} /> Fotoğraf seç</button>{profileAvatarDraft && <button type="button" className="profile-remove-photo" onClick={() => setProfileAvatarDraft(null)}>Kaldır</button>}</div><small className="profile-photo-help">JPG, PNG veya WebP · 8 MB’a kadar</small></div></section><section className="profile-editor-section"><div className="profile-section-heading"><span className="section-kicker">GÖRÜNÜŞ</span><small>Fotoğrafın yoksa baş harfin kullanılır.</small></div><div className="profile-color-row" role="group" aria-label="Profil rengi">{[{ key: 'lavender', label: 'Lavanta' }, { key: 'violet', label: 'Menekşe' }, { key: 'rose', label: 'Gül kurusu' }, { key: 'sky', label: 'Gökyüzü' }].map((tone) => <button type="button" key={tone.key} className={`profile-color-option tone-${tone.key} ${profileAvatarThemeDraft === tone.key ? 'selected' : ''}`} aria-label={`${tone.label} profil rengi`} aria-pressed={profileAvatarThemeDraft === tone.key} onClick={() => setProfileAvatarThemeDraft(tone.key as 'lavender' | 'violet' | 'rose' | 'sky')}><i /><span>{tone.label}</span>{profileAvatarThemeDraft === tone.key && <Check size={13} />}</button>)}</div></section><section className="profile-editor-section"><div className="profile-section-heading"><span className="section-kicker">KİMLİK</span><small>Uygulamada görünecek adın</small></div><label htmlFor="profile-name">Görünen ad</label><input id="profile-name" maxLength={32} value={profileNameDraft} onChange={(event) => setProfileNameDraft(event.target.value)} required /></section><section className="profile-progress-section"><label className="profile-gamification-toggle"><input type="checkbox" checked={profileGamificationDraft} onChange={(event) => setProfileGamificationDraft(event.target.checked)} /><span><b>İsteğe bağlı XP ve seviye ilerlemesi</b><small>Yalnızca kaydedilmiş etkinliklerden hesaplanır. Seri baskısı veya kaçırılan gün cezası yok.</small></span></label>{profileGamificationDraft ? <div className="profile-level-preview"><span className="profile-level-icon"><Sparkles size={17} /></span><div><b>Seviye {profileLevel} <i>·</i> {totalXp} XP</b><span>Bir sonraki seviyeye {100 - levelXp} XP</span><div className="profile-level-track"><i style={{ width: `${levelXp}%` }} /></div></div></div> : <p className="profile-private-note"><ShieldCheck size={14} /> Profil bilgilerin bu cihazda saklanır; fotoğraf buluta yalnızca sen şifreli yedeklemeyi başlatırsan eklenir.</p>}</section><footer className="profile-editor-actions"><button type="button" className="planner-back" onClick={() => setProfileOpen(false)}>Vazgeç</button><button type="submit" className="start-button"><Check size={15} /> Profili kaydet</button></footer></form></div>}
       {suggestionOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSuggestionOpen(false) }}><section className="task-modal suggestion-modal" role="dialog" aria-modal="true" aria-labelledby="suggestion-title"><div className="modal-top"><div className="planner-heading"><span className="planner-mark"><Sparkles size={18} /></span><div><span className="section-kicker">TAKVİM ÖNERİSİ</span><h2 id="suggestion-title">Uygun boşluklar</h2><p>{selectedCalendarLabel} için süre ve efor tercihine göre.</p></div></div><button type="button" className="icon-button" onClick={() => setSuggestionOpen(false)} aria-label="Kapat"><X size={19} /></button></div>{taskSuggestions.length ? <><div className="suggestion-list">{taskSuggestions.map((suggestion) => { const task = tasks.find((item) => item.id === suggestion.taskId); return task ? <button type="button" className="suggestion-option" key={task.id} onClick={() => choosePlanSuggestion(suggestion)}><span className="suggestion-time">{suggestion.time}</span><span className="suggestion-option-copy"><b>{task.title}</b><small>{task.duration} dk · {task.category} · {suggestion.reason} · şu an {task.date ?? todayKey} {task.time}</small></span><ArrowRight size={16} /></button> : null })}</div><p className="analysis-detail-note">Seçmek planı hemen değiştirmez. Önce taşıma önizlemesini görür, son kararı sen verirsin.</p></> : <div className="suggestion-empty">Bu günün boşluklarında süre ve efor tercihine uyan taşınabilir görev bulunamadı. Takvim planı değişmedi.</div>}</section></div>}
       {analysisDetailOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setAnalysisDetailOpen(false) }}><section className="task-modal analysis-detail-modal" role="dialog" aria-modal="true" aria-labelledby="analysis-detail-title"><div className="modal-top"><div className="planner-heading"><span className="planner-mark"><LayoutGrid size={18} /></span><div><span className="section-kicker">{analysisPeriod === 'week' ? 'BU HAFTA' : 'SON 4 HAFTA'}</span><h2 id="analysis-detail-title">Analiz ayrıntıları</h2><p>Plan, zamanlayıcı kaydı, öğrenme ve alışkanlık işaretleri ayrı gösterilir.</p></div></div><button type="button" className="icon-button" onClick={() => setAnalysisDetailOpen(false)} aria-label="Kapat"><X size={19} /></button></div><span className="section-kicker">PLAN / ZAMANLAYICI</span><div className="analysis-detail-list">{rangeChartItems.map((item) => <div className="analysis-detail-row" key={item.label}><span>{item.label}</span><b>{item.planned} dk plan · {Math.floor(item.focus / 60)} dk timer</b></div>)}</div><div className="analysis-detail-note">Planlanan görev süresi ile gerçek odak süresi aynı ölçüm değildir. Timer kaydı yalnızca tamamlanan zamanlayıcı oturumlarından gelir.</div><span className="section-kicker">KATEGORİLERE GÖRE TIMER</span><div className="analysis-detail-list">{rangeCategoryTotals.length ? rangeCategoryTotals.map((item) => <div className="analysis-detail-row" key={item.category}><span><i style={{ background: categoryPalette[item.category] ?? '#a89aba' }} />{item.category}</span><b>{formatDuration(item.seconds)}</b></div>) : <p className="empty-data-note">Bu dönemde timer oturumu kaydı yok.</p>}</div><span className="section-kicker">ÖĞRENME KAYDI</span><div className="analysis-detail-list"><div className="analysis-detail-row"><span>Öğrenme kategorisi · timer</span><b>{formatDuration(rangeLearningTimerSeconds)}</b></div><div className="analysis-detail-row"><span>Manuel çalışma kaydı</span><b>{rangeManualLearningMinutes} dk</b></div></div><div className="analysis-detail-list">{rangeStudyChartItems.map((item) => <div className="analysis-detail-row" key={item.label}><span>{item.label} · öğrenme toplamı</span><b>{Math.floor(item.seconds / 60)} dk</b></div>)}</div><div className="analysis-detail-note">Manuel öğrenme süresi, timer oturumlarından ayrı tutulur. Hedef adımları da öğrenme hedeflerinde ayrıca izlenir.</div><span className="section-kicker">ALIŞKANLIK İŞARETLERİ</span><div className="analysis-detail-list">{habits.length ? habits.map((habit) => <div className="analysis-detail-row" key={habit.id}><span>{habit.name}</span><b>{(habit.checkDates ?? []).filter((date) => rangeKeys.includes(date)).length} işaret</b></div>) : <p className="empty-data-note">Alışkanlık kaydı bulunmuyor.</p>}</div><div className="analysis-detail-note">Alışkanlıkların sıklığı kişiye özeldir; burada yalnızca bu dönemdeki işaret sayısı gösterilir. Az veri olduğunda trend çıkarımı yapılmaz.</div></section></div>}
-      {settingsOpen && <div className="modal-backdrop search-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false) }}><section className="task-modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><div className="modal-top"><div className="planner-heading"><span className="planner-mark"><Settings2 size={18} /></span><div><span className="section-kicker">KONTROL SENDE</span><h2 id="settings-title">Ayarlar</h2><p>Eşitleme, hatırlatmalar ve kısa yollar.</p></div></div><button type="button" className="icon-button" onClick={() => setSettingsOpen(false)} aria-label="Ayarları kapat"><X size={19} /></button></div><section className="settings-section"><span className="section-kicker">G · ŞİFRELİ BULUT EŞİTLEME</span><h3>Yalnızca sen başlatınca aktarılır</h3><p className="settings-copy">Eşitleme parolan cihazında AES-GCM şifrelemesi için kullanılır ve sunucuya gönderilmez. Worker yalnızca şifreli içerik saklar. İlk gönderme ve bu cihaza geri yükleme ayrıca onay ister.</p>{!syncToken ? <form className="settings-connect-form" onSubmit={connectCloudSync}><label>Worker API adresi<input type="url" value={syncApiUrl} onChange={(event) => setSyncApiUrl(event.target.value)} required placeholder="https://…workers.dev" /></label><label>Worker erişim parolası<small>Worker ayarında APP_PASSWORD olarak yapılandırdığın mevcut parola. Eşitleme parolasından farklıdır.</small><input type="password" value={syncPassword} onChange={(event) => setSyncPassword(event.target.value)} required autoComplete="current-password" /></label><button type="submit" className="secondary-action-button">Güvenli oturum aç</button></form> : <div className="settings-connect-form"><div className="connection-state"><span className="status-pip" /> Worker oturumu açık · veri aktarımı başlamadı</div><label>Eşitleme parolası <small>12+ karakter; diğer cihazlarda da aynı parolayı kullan. Uygulama saklamaz.</small><input type="password" minLength={12} value={syncPassphrase} onChange={(event) => setSyncPassphrase(event.target.value)} autoComplete="new-password" /></label><div className="settings-button-row"><button type="button" className="secondary-action-button" onClick={uploadEncryptedSync}><ArrowDownToLine size={15} /> Şifrele ve buluta gönder</button><button type="button" className="secondary-action-button" onClick={downloadEncryptedSync}><Upload size={15} /> Şifreli yedeği indir</button></div><button type="button" className="plain-settings-button" onClick={disconnectCloudSync}>Oturumu kapat</button></div>}</section><section className="settings-section"><span className="section-kicker">F · GÖREV HATIRLATMALARI</span><h3>{remindersOn ? 'Hatırlatmalar açık' : 'Hatırlatmalar kapalı'}</h3><p className="settings-copy">Görev saatinde ve sonra her 5 dakikada bir hatırlatma isteği gönderilir; tamamlamak, ertelemek, arşivlemek veya silmek durdurur. Hatırlatma için görev zamanı ve başlığı Worker'a iletilir; gizlilik açıkken başlık D1'de genel metne çevrilir. Teslimat tarayıcı ve işletim sistemine bağlıdır.</p><div className="settings-connect-form"><div className="form-row"><div><label htmlFor="quiet-start">Sessiz saat başlangıcı</label><input id="quiet-start" type="time" value={quietStart} onChange={(event) => setQuietStart(event.target.value)} /></div><div><label htmlFor="quiet-end">Sessiz saat bitişi</label><input id="quiet-end" type="time" value={quietEnd} onChange={(event) => setQuietEnd(event.target.value)} /></div></div><label>Bildirim metni<select value={reminderWording} onChange={(event) => setReminderWording(event.target.value as 'brief' | 'task')}><option value="brief">Kısa: “Görev zamanı.”</option><option value="task">Görev başlığını göster</option></select></label><label className="settings-check"><input type="checkbox" checked={privacyMode} onChange={(event) => setPrivacyMode(event.target.checked)} /><span>Kilit ekranında görev başlığını gizle</span></label><div className="settings-button-row"><button type="button" className="secondary-action-button" disabled={!syncToken} onClick={() => { const form = document.getElementById('reminder-save-proxy') as HTMLFormElement | null; form?.requestSubmit() }}>Tercihleri kaydet</button>{remindersOn ? <button type="button" className="plain-settings-button" onClick={disableTaskReminders}>Bu cihazda kapat</button> : <button type="button" className="add-task-button" disabled={!syncToken} onClick={enableTaskReminders}><Bell size={15} /> Hatırlatmaları etkinleştir</button>}</div>{remindersOn && <div className={`reminder-sync-status sync-${reminderSyncState}`} role="status"><span>{reminderSyncState === 'syncing' ? 'Görev hatırlatmaları eşitleniyor…' : reminderSyncState === 'synced' ? 'Görev hatırlatmaları Worker ile eşitlendi.' : reminderSyncState === 'error' ? reminderSyncError : syncToken ? 'Eşitleme bekliyor.' : 'Worker oturumu kapalı; görev değişiklikleri eşitlenmiyor.'}</span>{reminderSyncState === 'error' && <button type="button" onClick={() => setReminderSyncAttempt((attempt) => attempt + 1)}>Yeniden dene</button>}</div>}<form id="reminder-save-proxy" onSubmit={saveReminderPreferences} /></div></section><section className="settings-section"><span className="section-kicker">I · ÖZEL KATEGORİLER</span><h3>Kategorilerin</h3><p className="settings-copy">Yeni kategoriyi görev planlarken de ekleyebilirsin.</p><div className="settings-category-list">{availableCategories.map((category) => <span key={category.label}>{category.label}{customCategories.includes(category.label) && <button type="button" aria-label={`${category.label} kategorisini kaldır`} onClick={() => { if (tasks.some((task) => task.category === category.label)) { setToast('Bu kategori görevlerde kullanılıyor; önce görevlerini başka kategoriye taşı.'); return } setCustomCategories((items) => items.filter((item) => item !== category.label)) }}>×</button>}</span>)}</div></section><section className="settings-section"><span className="section-kicker">K · KESTİRMELER</span><h3>Hızlı açılışlar</h3><p className="settings-copy">Manifest kısayolları desteklenen kurulumlarda görünür. iOS Kestirmeler’de “URL’yi aç” eylemine aşağıdaki bağlantıyı ekle. iOS PWA’larında yerel ana ekran widget’ı web uygulamasıyla sunulamıyor.</p><div className="settings-button-row"><button type="button" className="secondary-action-button" onClick={() => copyQuickLink('add-task')}>Görev ekle URL’si</button><button type="button" className="secondary-action-button" onClick={() => copyQuickLink('calendar')}>Takvim URL’si</button><button type="button" className="secondary-action-button" onClick={() => copyQuickLink('start-focus')}>Odak URL’si</button></div></section>{syncStatus && <div className="sync-status" role="status">{syncStatus}</div>}</section></div>}
+      {settingsOpen && <div className="modal-backdrop search-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSettingsOpen(false) }}><section className="task-modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><div className="modal-top"><div className="planner-heading"><span className="planner-mark"><Settings2 size={18} /></span><div><span className="section-kicker">KONTROL SENDE</span><h2 id="settings-title">Ayarlar</h2><p>Eşitleme, hatırlatmalar ve kısa yollar.</p></div></div><button type="button" className="icon-button" onClick={() => setSettingsOpen(false)} aria-label="Ayarları kapat"><X size={19} /></button></div><section className="settings-section"><span className="section-kicker">G · ŞİFRELİ BULUT EŞİTLEME</span><h3>Yalnızca sen başlatınca aktarılır</h3><p className="settings-copy">Eşitleme parolan cihazında AES-GCM şifrelemesi için kullanılır ve sunucuya gönderilmez. Worker yalnızca şifreli içerik saklar. İlk gönderme ve bu cihaza geri yükleme ayrıca onay ister.</p>{!syncToken ? <div className="account-auth-panel"><div className="account-auth-tabs" role="group" aria-label="Hesap işlemi"><button type="button" className={accountMode !== 'recover' ? 'selected' : ''} aria-pressed={accountMode !== 'recover'} onClick={() => setAccountMode('login')}>Giriş / kayıt</button><button type="button" className={accountMode === 'recover' ? 'selected' : ''} aria-pressed={accountMode === 'recover'} onClick={() => setAccountMode('recover')}>Kodu kullan</button></div><form className="settings-connect-form" onSubmit={connectCloudSync}><label>Worker API adresi<input type="url" value={syncApiUrl} onChange={(event) => setSyncApiUrl(event.target.value)} required placeholder="https://…workers.dev" /></label><p className="account-auth-note">E-posta yalnızca giriş adıdır; e-posta gönderilmez. Planların bu cihazda kalır ve buluta yalnızca sen şifreli eşitlemeyi başlatınca gider.</p><label htmlFor="account-email">E-posta<input id="account-email" type="email" autoComplete="email" maxLength={254} value={accountEmail} onChange={(event) => setAccountEmail(event.target.value)} required placeholder="ornek@email.com" /></label>{accountMode === 'recover' ? <><label htmlFor="account-recovery-code">Kurtarma kodu<input id="account-recovery-code" autoComplete="off" value={accountRecoveryCodeInput} onChange={(event) => setAccountRecoveryCodeInput(event.target.value)} required /></label><label htmlFor="account-new-password">Yeni parola <small>En az 12 karakter</small><input id="account-new-password" type="password" autoComplete="new-password" minLength={12} maxLength={128} value={accountNewPassword} onChange={(event) => setAccountNewPassword(event.target.value)} required /></label></> : <><label htmlFor="account-password">{accountMode === 'register' ? 'Hesap parolası' : 'Parola'}{accountMode === 'register' && <small>En az 12 karakter</small>}<input id="account-password" type="password" autoComplete={accountMode === 'register' ? 'new-password' : 'current-password'} minLength={accountMode === 'register' ? 12 : undefined} maxLength={128} value={syncPassword} onChange={(event) => setSyncPassword(event.target.value)} required /></label>{accountMode === 'register' && <label htmlFor="account-setup-key">İlk hesap kurulum anahtarı <small>Worker’daki APP_PASSWORD. Yalnızca ilk hesapta istenir.</small><input id="account-setup-key" type="password" autoComplete="off" value={accountSetupKey} onChange={(event) => setAccountSetupKey(event.target.value)} required /></label>}</>}<button type="submit" className="secondary-action-button">{accountMode === 'recover' ? 'Kurtarma koduyla parolayı yenile' : accountMode === 'register' ? 'Kişisel hesabı oluştur' : 'Giriş yap'}</button>{accountMode === 'login' ? <button type="button" className="account-auth-link" onClick={() => setAccountMode('register')}>İlk hesabını oluştur</button> : accountMode === 'register' ? <button type="button" className="account-auth-link" onClick={() => setAccountMode('login')}>Hesabın var mı? Giriş yap</button> : <button type="button" className="account-auth-link" onClick={() => setAccountMode('login')}>Girişe dön</button>}</form></div> : <div className="settings-connect-form"><div className="connection-state"><span className="status-pip" /> Kişisel hesap oturumu açık · veri aktarımı başlamadı</div><label>Eşitleme parolası <small>12+ karakter; diğer cihazlarda da aynı parolayı kullan. Uygulama saklamaz.</small><input type="password" minLength={12} value={syncPassphrase} onChange={(event) => setSyncPassphrase(event.target.value)} autoComplete="new-password" /></label><div className="settings-button-row"><button type="button" className="secondary-action-button" onClick={uploadEncryptedSync}><ArrowDownToLine size={15} /> Şifrele ve buluta gönder</button><button type="button" className="secondary-action-button" onClick={downloadEncryptedSync}><Upload size={15} /> Şifreli yedeği indir</button></div><button type="button" className="plain-settings-button" onClick={disconnectCloudSync}>Oturumu kapat</button></div>}</section><section className="settings-section"><span className="section-kicker">F · GÖREV HATIRLATMALARI</span><h3>{remindersOn ? 'Hatırlatmalar açık' : 'Hatırlatmalar kapalı'}</h3><p className="settings-copy">Worker görev saatinde ve ardından her 5 dakikada bir gönderim dener. Desteklenen cihazlarda bildirimden tamamlayabilir veya 10 dakika erteleyebilirsin; bildirime dokunup uygulamada düzenleyebilir ya da arşivleyebilirsin. Sessiz saatlerde gönderim bekletilir. Görev zamanı Worker'a gider; kilit ekranı gizliliği açıksa başlık D1'de genel metne çevrilir. İzin, internet, tarayıcı ve işletim sistemi teslimatı etkiler; kesin teslimat garantisi yoktur.</p><div className={`notification-health permission-${notificationPermission}`} role="status"><i />{notificationPermission === 'unsupported' ? 'Bu tarayıcı Web Push bildirimlerini desteklemiyor.' : notificationPermission === 'denied' ? 'Bildirim izni kapalı. Tarayıcı veya iOS ayarlarından açman gerekir.' : notificationPermission === 'default' ? (/iPhone|iPad|iPod/i.test(navigator.userAgent) ? 'iPhone/iPad’de bu PWA’yı Ana Ekran’a ekleyip oradan aç; ardından bildirim izni ver.' : 'Bildirim izni henüz verilmedi.') : remindersOn ? 'İzin verildi · bu cihaz push aboneliği açık.' : 'İzin verildi · bu cihazda push aboneliği kapalı.'}</div><div className="settings-connect-form"><div className="form-row"><div><label htmlFor="quiet-start">Sessiz saat başlangıcı</label><input id="quiet-start" type="time" value={quietStart} onChange={(event) => setQuietStart(event.target.value)} /></div><div><label htmlFor="quiet-end">Sessiz saat bitişi</label><input id="quiet-end" type="time" value={quietEnd} onChange={(event) => setQuietEnd(event.target.value)} /></div></div><label>Bildirim metni<select value={reminderWording} onChange={(event) => setReminderWording(event.target.value as 'brief' | 'task')}><option value="brief">Kısa: “Görev zamanı.”</option><option value="task">Görev başlığını göster</option></select></label><label className="settings-check"><input type="checkbox" checked={privacyMode} onChange={(event) => setPrivacyMode(event.target.checked)} /><span>Kilit ekranında görev başlığını gizle</span></label><div className="settings-button-row"><button type="button" className="secondary-action-button" disabled={!syncToken} onClick={() => { const form = document.getElementById('reminder-save-proxy') as HTMLFormElement | null; form?.requestSubmit() }}>Tercihleri kaydet</button>{remindersOn ? <><button type="button" className="secondary-action-button" disabled={notificationPermission !== 'granted'} onClick={testPushNotification}>Test bildirimi gönder</button><button type="button" className="plain-settings-button" onClick={disableTaskReminders}>Bu cihazda kapat</button></> : <button type="button" className="add-task-button" disabled={!syncToken || notificationPermission === 'unsupported'} onClick={enableTaskReminders}><Bell size={15} /> Hatırlatmaları etkinleştir</button>}</div>{remindersOn && <div className={`reminder-sync-status sync-${reminderSyncState}`} role="status"><span>{reminderSyncState === 'syncing' ? 'Görev hatırlatmaları eşitleniyor…' : reminderSyncState === 'synced' ? 'Görev hatırlatmaları Worker ile eşitlendi.' : reminderSyncState === 'error' ? reminderSyncError : syncToken ? 'Eşitleme bekliyor.' : 'Worker oturumu kapalı; görev değişiklikleri eşitlenmiyor.'}</span>{reminderSyncState === 'error' && <button type="button" onClick={() => setReminderSyncAttempt((attempt) => attempt + 1)}>Yeniden dene</button>}</div>}<form id="reminder-save-proxy" onSubmit={saveReminderPreferences} /></div></section><section className="settings-section"><span className="section-kicker">I · ÖZEL KATEGORİLER</span><h3>Kategorilerin</h3><p className="settings-copy">Yeni kategoriyi görev planlarken de ekleyebilirsin.</p><div className="settings-category-list">{availableCategories.map((category) => <span key={category.label}>{category.label}{customCategories.includes(category.label) && <button type="button" aria-label={`${category.label} kategorisini kaldır`} onClick={() => { if (tasks.some((task) => task.category === category.label)) { setToast('Bu kategori görevlerde kullanılıyor; önce görevlerini başka kategoriye taşı.'); return } setCustomCategories((items) => items.filter((item) => item !== category.label)) }}>×</button>}</span>)}</div></section><section className="settings-section"><span className="section-kicker">K · KESTİRMELER</span><h3>Hızlı açılışlar</h3><p className="settings-copy">Manifest kısayolları desteklenen kurulumlarda görünür. iOS Kestirmeler’de “URL’yi aç” eylemine aşağıdaki bağlantıyı ekle. iOS PWA’larında yerel ana ekran widget’ı web uygulamasıyla sunulamıyor.</p><div className="settings-button-row"><button type="button" className="secondary-action-button" onClick={() => copyQuickLink('add-task')}>Görev ekle URL’si</button><button type="button" className="secondary-action-button" onClick={() => copyQuickLink('calendar')}>Takvim URL’si</button><button type="button" className="secondary-action-button" onClick={() => copyQuickLink('start-focus')}>Odak URL’si</button></div></section>{syncStatus && <div className="sync-status" role="status">{syncStatus}</div>}</section></div>}
+      {pendingRecoveryCode && <div className="modal-backdrop account-recovery-backdrop"><section className="task-modal account-recovery-modal" role="dialog" aria-modal="true" aria-labelledby="recovery-title"><div className="recovery-icon"><ShieldCheck size={21} /></div><span className="section-kicker">BİR KERE GÖSTERİLİR</span><h2 id="recovery-title">Kurtarma kodun</h2><p>Bu kodu parola unutulursa kullanırsın. E-postayla gönderilmez ve uygulamada saklanmaz. Güvenli bir yere kaydet.</p><code>{pendingRecoveryCode}</code><div className="recovery-actions"><button type="button" className="secondary-action-button recovery-copy-button" onClick={copyAccountRecoveryCode}>Kodu kopyala</button><button type="button" className="secondary-action-button recovery-copy-button" onClick={downloadAccountRecoveryCode}>Kodu dosya olarak indir</button></div><label className="recovery-saved-check"><input type="checkbox" checked={recoveryCodeSaved} onChange={(event) => setRecoveryCodeSaved(event.target.checked)} /><span>Kodu güvenli bir yere kaydettim.</span></label><button type="button" className="start-button modal-submit" disabled={!recoveryCodeSaved} onClick={() => { setPendingRecoveryCode(''); setRecoveryCodeSaved(false) }}>Devam et</button></section></div>}
       {searchOpen && <div className="modal-backdrop search-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setSearchOpen(false) }}><section className="task-modal search-modal" role="dialog" aria-modal="true" aria-labelledby="search-title"><div className="modal-top"><div className="planner-heading"><span className="planner-mark"><Search size={18} /></span><div><span className="section-kicker">GÖREV ARŞİVİ</span><h2 id="search-title">Bul ve düzenle</h2><p>Görev adı, kategori veya not içinde ara.</p></div></div><button type="button" className="icon-button" onClick={() => setSearchOpen(false)} aria-label="Aramayı kapat"><X size={19} /></button></div><label className="search-input-wrap"><Search size={17} /><input autoFocus value={searchQuery} onChange={(event) => setSearchQuery(event.target.value)} placeholder="Görev veya kategori ara…" /></label><div className="search-tabs"><button type="button" className={!showArchived ? 'selected' : ''} onClick={() => setShowArchived(false)}>Aktif görevler</button><button type="button" className={showArchived ? 'selected' : ''} onClick={() => setShowArchived(true)}>Arşiv ({tasks.filter((task) => task.archived).length})</button></div><div className="search-results">{searchResults.length ? searchResults.map((task) => <article className="search-result" key={task.id}><button type="button" className="search-result-main" onClick={() => { setSelectedDay(task.date ?? todayKey); setCalendarAnchor(task.date ?? todayKey); setActiveTab('Takvim'); setSearchOpen(false) }}><span className={`recommendation-task-icon tone-${availableCategories.find((item) => item.label === task.category)?.tone ?? 'lilac'}`}><Focus size={16} /></span><span><b>{task.title}</b><small>{task.category} · {task.date ?? todayKey} · {task.time}{task.done ? ' · Tamamlandı' : ''}</small></span><ArrowRight size={15} /></button><button type="button" className="archive-action" onClick={() => { setTasks((items) => items.map((item) => item.id === task.id ? { ...item, archived: !item.archived } : item)); setToast(task.archived ? 'Görev arşivden çıkarıldı.' : 'Görev arşivlendi.') }}>{task.archived ? 'Geri al' : 'Arşivle'}</button></article>) : <div className="search-empty"><Search size={20} /><b>{showArchived ? 'Arşiv boş' : 'Eşleşen görev yok'}</b><span>Arama kelimeni değiştirebilir veya başka bir kategori deneyebilirsin.</span></div>}</div></section></div>}
+      {quickCaptureOpen && <div className="modal-backdrop quick-capture-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setQuickCaptureOpen(false) }}><form className="task-modal quick-capture-modal" onSubmit={commitQuickCapture} role="dialog" aria-modal="true" aria-labelledby="quick-capture-title"><div className="modal-top"><div className="planner-heading"><span className="planner-mark"><Zap size={18} /></span><div><span className="section-kicker">HIZLI YAKALA · SONRA PLANLA</span><h2 id="quick-capture-title">Aklındakini ekle</h2><p>Görevini yaz; istersen tarih ve saati cümlene ekle.</p></div></div><button type="button" className="icon-button" onClick={() => setQuickCaptureOpen(false)} aria-label="Kapat"><X size={19} /></button></div><label className="quick-capture-input-label" htmlFor="quick-capture-input">Görev</label><input id="quick-capture-input" className="quick-capture-input" autoFocus maxLength={160} value={quickCaptureText} onChange={(event) => setQuickCaptureText(event.target.value)} placeholder="Örn. Yarın 14:30 İngilizce tekrar" /><p className="quick-capture-help">Türkçe tarih/saat: bugün, yarın, öbür gün, haftanın günü, 14:30 veya “saat 14”. Kısayollar: <kbd>N</kbd> hızlı ekle · <kbd>/</kbd> ara.</p>{(() => { const draft = parseQuickTaskInput(quickCaptureText, now); return <div className="quick-capture-preview"><span className="quick-preview-icon"><CalendarDays size={17} /></span><span><small>ÖNİZLEME · ONAYINDAN ÖNCE GÖREV EKLENMEZ</small><b>{draft.title || 'Görev adı burada görünür'}</b><em>{new Intl.DateTimeFormat('tr-TR', { weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(`${draft.date}T12:00:00`))} · {draft.time}{!draft.hasDate && !draft.hasTime ? ' · varsayılan' : ''} · 30 dk · {activeTab === 'Öğrenme' ? 'Öğrenme' : 'Kişisel'}</em></span></div> })()}<div className="quick-capture-actions"><button type="button" className="planner-back" onClick={() => setQuickCaptureOpen(false)}>Vazgeç</button><button type="submit" className="start-button" disabled={!parseQuickTaskInput(quickCaptureText, now).title}><Plus size={16} /> Hızlıca ekle</button></div></form></div>}
       {modalOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) closeTaskModal() }}><form className="task-modal task-planner-modal" onSubmit={handleTaskFormSubmit}>
         <div className="modal-top"><div className="planner-heading"><span className="planner-mark"><Sparkles size={18} /></span><div><span className="section-kicker">{editingTask ? 'GÖREVİNİ GÜNCELLE' : 'KENDİ RİTMİNİ KUR'}</span><h2>{editingTask ? 'Görevi düzenle' : 'Görevini planla'}</h2><p>Önce görevi seç, sonra sana uygun planı kur.</p></div></div><button type="button" className="icon-button" onClick={closeTaskModal} aria-label="Kapat"><X size={19} /></button></div>
         <div className="planner-stepper" aria-label="Planlama adımları"><span className={plannerStep === 1 ? 'active' : 'complete'}><i>01</i><b>Görevini tanımla</b></span><em /><span className={plannerStep === 2 ? 'active' : ''}><i>02</i><b>Zamanını seç</b></span></div>
