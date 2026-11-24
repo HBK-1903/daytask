@@ -54,6 +54,12 @@ export function constantTimeEqual(left: string, right: string): boolean {
   return difference === 0
 }
 
+export async function signCapabilityToken(secret: string, purpose: string, subject: string, nonce: string): Promise<string> {
+  const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(`${purpose}:${subject}:${nonce}`))
+  return toBase64Url(new Uint8Array(signature))
+}
+
 export async function makeRateLimitBucket(secret: string, scope: string, address: string): Promise<string> {
   const key = await crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
   const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(`${scope}:${address}`))

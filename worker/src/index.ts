@@ -1,5 +1,5 @@
 import { buildPushPayload, type PushSubscription as WebPushSubscription, type VapidKeys } from '@block65/webcrypto-web-push'
-import { constantTimeEqual, generateRecoveryCode, hashCredential, incrementRateLimit, isValidNewPassword, makeRateLimitBucket, normalizeEmail, normalizeRecoveryCode } from './auth'
+import { constantTimeEqual, generateRecoveryCode, hashCredential, incrementRateLimit, isValidNewPassword, makeRateLimitBucket, normalizeEmail, normalizeRecoveryCode, signCapabilityToken } from './auth'
 
 interface Env {
   hbkd1: D1Database
@@ -21,6 +21,7 @@ interface TaskInput {
   durationMinutes?: number
   status?: 'pending' | 'completed' | 'dismissed'
 }
+type ReminderAction = 'complete' | 'snooze' | 'dismiss'
 interface SyncVaultInput { salt: string; iv: string; ciphertext: string }
 interface ReminderSettingsInput { quietStart: string; quietEnd: string; wording: 'brief' | 'task'; privacyMode: boolean }
 
@@ -146,6 +147,18 @@ async function accountRateLimited(request: Request, env: Env, scope: string): Pr
   return attempts > 10
 }
 
+function createActionNonce(): string {
+  return encodeBase64Url(crypto.getRandomValues(new Uint8Array(32)))
+}
+
+function isReminderAction(value: unknown): value is { taskId: string; actionToken: string; action: ReminderAction } {
+  if (!value || typeof value !== 'object') return false
+  const action = value as { taskId?: unknown; actionToken?: unknown; action?: unknown }
+  return typeof action.taskId === 'string' && action.taskId.length > 0 && action.taskId.length <= 128
+    && typeof action.actionToken === 'string' && /^[A-Za-z0-9_-]{40,64}$/.test(action.actionToken)
+    && (action.action === 'complete' || action.action === 'snooze' || action.action === 'dismiss')
+}
+
 async function route(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url)
   const path = url.pathname.replace(/\/+$/, '') || '/'
@@ -232,6 +245,29 @@ async function route(request: Request, env: Env): Promise<Response> {
     return response(request, env, { token: await signSession(env), expiresIn: 604800 })
   }
 
+  if (path === '/api/reminders/action' && request.method === 'POST') {
+    if (!env.SESSION_SECRET) return response(request, env, { error: 'Bildirim aksiyonları yapılandırılmamış.' }, 503)
+    const payload: unknown = await request.json().catch(() => null)
+    if (!isReminderAction(payload)) return response(request, env, { error: 'Bildirim aksiyonu geçersiz.' }, 400)
+    const task = await env.hbkd1.prepare('SELECT status, action_nonce AS actionNonce FROM tasks WHERE id = ?').bind(payload.taskId).first<{ status: string; actionNonce: string | null }>()
+    if (!task || task.status !== 'pending' || !task.actionNonce) return response(request, env, { error: 'Bu görev için bildirim aksiyonu artık geçerli değil.' }, 409)
+    const expectedToken = await signCapabilityToken(env.SESSION_SECRET, 'reminder', payload.taskId, task.actionNonce)
+    if (!constantTimeEqual(expectedToken, payload.actionToken)) return response(request, env, { error: 'Bildirim aksiyonunun süresi dolmuş.' }, 403)
+    const now = Date.now()
+    const nextNonce = createActionNonce()
+    const status = payload.action === 'complete' ? 'completed' : payload.action === 'dismiss' ? 'dismissed' : 'pending'
+    const nextMinute = new Date(now)
+    nextMinute.setSeconds(0, 0)
+    const dueAt = payload.action === 'snooze' ? nextMinute.getTime() + 10 * 60_000 : 0
+    const result = payload.action === 'snooze'
+      ? await env.hbkd1.prepare(`UPDATE tasks SET due_at = ?, next_reminder_at = ?, reminder_count = 0, action_nonce = ?, updated_at = ?
+          WHERE id = ? AND status = 'pending' AND action_nonce = ?`).bind(dueAt, dueAt, nextNonce, now, payload.taskId, task.actionNonce).run()
+      : await env.hbkd1.prepare(`UPDATE tasks SET status = ?, next_reminder_at = 0, action_nonce = ?, updated_at = ?
+          WHERE id = ? AND status = 'pending' AND action_nonce = ?`).bind(status, nextNonce, now, payload.taskId, task.actionNonce).run()
+    if (!result.meta.changes) return response(request, env, { error: 'Görev değişti; bildirimi uygulamadan açıp kontrol et.' }, 409)
+    return response(request, env, { ok: true, action: payload.action, dueAt: payload.action === 'snooze' ? dueAt : undefined })
+  }
+
   if (path === '/api/push/public-key' && request.method === 'GET') {
     if (!env.VAPID_PUBLIC_KEY) return response(request, env, { error: 'Push anahtarları henüz yapılandırılmamış.' }, 503)
     return response(request, env, { publicKey: env.VAPID_PUBLIC_KEY })
@@ -239,6 +275,29 @@ async function route(request: Request, env: Env): Promise<Response> {
 
   const authError = await requireSession(request, env)
   if (authError) return authError
+
+  if (path === '/api/push/test' && request.method === 'POST') {
+    if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY || !env.VAPID_SUBJECT) return response(request, env, { error: 'Push anahtarları henüz yapılandırılmamış.' }, 503)
+    const subscriptions = await env.hbkd1.prepare('SELECT endpoint, p256dh, auth FROM push_subscriptions').all<{ endpoint: string; p256dh: string; auth: string }>()
+    if (!subscriptions.results.length) return response(request, env, { error: 'Bu cihaz için kayıtlı push aboneliği bulunamadı.' }, 404)
+    let sent = 0
+    let failed = 0
+    let expired = 0
+    for (const subscription of subscriptions.results) {
+      try {
+        const pushSubscription: WebPushSubscription = { endpoint: subscription.endpoint, expirationTime: null, keys: { p256dh: subscription.p256dh, auth: subscription.auth } }
+        const vapid: VapidKeys = { subject: env.VAPID_SUBJECT, publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY }
+        const payload = await buildPushPayload({ data: JSON.stringify({ title: 'Violet Focus', body: 'Bu bir test bildirimidir. Görev planın değiştirilmedi.', url: '/' }), options: { ttl: 60 } }, pushSubscription, vapid)
+        const result = await fetch(pushSubscription.endpoint, payload)
+        if (result.status >= 200 && result.status < 300) sent += 1
+        else if (result.status === 404 || result.status === 410) {
+          expired += 1
+          await env.hbkd1.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').bind(subscription.endpoint).run()
+        } else failed += 1
+      } catch { failed += 1 }
+    }
+    return response(request, env, { ok: sent > 0, sent, failed, expired }, sent > 0 ? 200 : 502)
+  }
 
   if (path === '/api/sync' && request.method === 'GET') {
     const vault = await env.hbkd1.prepare('SELECT salt, iv, ciphertext, updated_at AS updatedAt FROM sync_vault WHERE owner = ?').bind('owner').first<{ salt: string; iv: string; ciphertext: string; updatedAt: number }>()
@@ -297,14 +356,19 @@ async function route(request: Request, env: Env): Promise<Response> {
     const now = Date.now()
     const status = payload.status ?? 'pending'
     const nextReminderAt = status === 'pending' ? payload.dueAt : 0
+    const current = await env.hbkd1.prepare('SELECT due_at AS dueAt, status, action_nonce AS actionNonce FROM tasks WHERE id = ?').bind(payload.id).first<{ dueAt: number; status: string; actionNonce: string | null }>()
+    const scheduleChanged = !current || current.dueAt !== payload.dueAt || current.status !== status
+    const actionNonce = scheduleChanged || !current?.actionNonce ? createActionNonce() : current.actionNonce
+    const actionApiUrl = new URL(request.url).origin
     const privacy = await env.hbkd1.prepare('SELECT privacy_mode AS privacyMode FROM reminder_settings WHERE owner = ?').bind('owner').first<{ privacyMode: number }>()
     const storedTitle = privacy?.privacyMode !== 0 ? 'Görev zamanı.' : payload.title.trim()
     const storedCategory = privacy?.privacyMode !== 0 ? 'Kişisel' : payload.category ?? 'Kişisel'
-    await env.hbkd1.prepare(`INSERT INTO tasks (id, title, category, due_at, duration_minutes, status, reminder_interval_minutes, next_reminder_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, 5, ?, ?)
+    await env.hbkd1.prepare(`INSERT INTO tasks (id, title, category, due_at, duration_minutes, status, reminder_interval_minutes, next_reminder_at, updated_at, action_nonce, action_api_url)
+      VALUES (?, ?, ?, ?, ?, ?, 5, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET title = excluded.title, category = excluded.category, due_at = excluded.due_at,
-        duration_minutes = excluded.duration_minutes, status = excluded.status, next_reminder_at = excluded.next_reminder_at, updated_at = excluded.updated_at`)
-      .bind(payload.id, storedTitle, storedCategory, payload.dueAt, payload.durationMinutes ?? 30, status, nextReminderAt, now).run()
+        duration_minutes = excluded.duration_minutes, status = excluded.status, next_reminder_at = excluded.next_reminder_at, updated_at = excluded.updated_at,
+        action_nonce = excluded.action_nonce, action_api_url = excluded.action_api_url`)
+      .bind(payload.id, storedTitle, storedCategory, payload.dueAt, payload.durationMinutes ?? 30, status, nextReminderAt, now, actionNonce, actionApiUrl).run()
     return response(request, env, { ok: true, id: payload.id })
   }
 
@@ -321,11 +385,11 @@ async function route(request: Request, env: Env): Promise<Response> {
     const status = payload?.status
     const now = Date.now()
     if (status === 'completed' || status === 'dismissed') {
-      await env.hbkd1.prepare('UPDATE tasks SET status = ?, next_reminder_at = ?, updated_at = ? WHERE id = ?')
-        .bind(status, 0, now, id).run()
+      await env.hbkd1.prepare('UPDATE tasks SET status = ?, next_reminder_at = ?, action_nonce = ?, updated_at = ? WHERE id = ?')
+        .bind(status, 0, createActionNonce(), now, id).run()
     } else if ((status === 'pending' || status === 'snoozed') && typeof payload?.dueAt === 'number' && Number.isFinite(payload.dueAt)) {
-      await env.hbkd1.prepare('UPDATE tasks SET status = ?, due_at = ?, next_reminder_at = ?, reminder_count = 0, updated_at = ? WHERE id = ?')
-        .bind('pending', payload.dueAt, payload.dueAt, now, id).run()
+      await env.hbkd1.prepare('UPDATE tasks SET status = ?, due_at = ?, next_reminder_at = ?, reminder_count = 0, action_nonce = ?, updated_at = ? WHERE id = ?')
+        .bind('pending', payload.dueAt, payload.dueAt, createActionNonce(), now, id).run()
     } else {
       return response(request, env, { error: 'Durum veya yeni zaman geçersiz.' }, 400)
     }
@@ -335,7 +399,7 @@ async function route(request: Request, env: Env): Promise<Response> {
   return response(request, env, { error: 'Bulunamadı.' }, 404)
 }
 
-async function sendReminder(env: Env, task: { id: string; title: string; category: string }, subscription: { endpoint: string; p256dh: string; auth: string }, settings: { wording: 'brief' | 'task'; privacyMode: boolean }): Promise<number> {
+async function sendReminder(env: Env, task: { id: string; title: string; category: string; actionNonce: string | null; actionApiUrl: string }, subscription: { endpoint: string; p256dh: string; auth: string }, settings: { wording: 'brief' | 'task'; privacyMode: boolean }): Promise<number> {
   if (!env.VAPID_PUBLIC_KEY || !env.VAPID_PRIVATE_KEY || !env.VAPID_SUBJECT) throw new Error('VAPID settings are missing')
   const pushSubscription: WebPushSubscription = {
     endpoint: subscription.endpoint,
@@ -343,8 +407,18 @@ async function sendReminder(env: Env, task: { id: string; title: string; categor
     keys: { p256dh: subscription.p256dh, auth: subscription.auth },
   }
   const vapid: VapidKeys = { subject: env.VAPID_SUBJECT, publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY }
+  const actionToken = task.actionNonce && task.actionApiUrl
+    ? await signCapabilityToken(env.SESSION_SECRET, 'reminder', task.id, task.actionNonce)
+    : undefined
   const payload = await buildPushPayload({
-    data: JSON.stringify({ title: 'Violet Focus', body: settings.privacyMode || settings.wording === 'brief' ? 'Görev zamanı.' : task.title, taskId: task.id, url: `/?reminderTask=${encodeURIComponent(task.id)}` }),
+    data: JSON.stringify({
+      title: 'Violet Focus',
+      body: settings.privacyMode || settings.wording === 'brief' ? 'Görev zamanı.' : task.title,
+      taskId: task.id,
+      url: `/?reminderTask=${encodeURIComponent(task.id)}`,
+      actionUrl: actionToken ? `${task.actionApiUrl}/api/reminders/action` : undefined,
+      actionToken,
+    }),
     options: { ttl: 300 },
   }, pushSubscription, vapid)
   const pushResponse = await fetch(pushSubscription.endpoint, payload)
@@ -365,9 +439,10 @@ async function processDueReminders(env: Env): Promise<void> {
   const configured = await env.hbkd1.prepare('SELECT quiet_start AS quietStart, quiet_end AS quietEnd, wording, privacy_mode AS privacyMode FROM reminder_settings WHERE owner = ?').bind('owner').first<{ quietStart: string; quietEnd: string; wording: 'brief' | 'task'; privacyMode: number }>()
   const settings = configured ? { ...configured, privacyMode: Boolean(configured.privacyMode) } : { quietStart: '22:00', quietEnd: '08:00', wording: 'brief' as const, privacyMode: true }
   if (isInQuietHours(new Date(now), settings.quietStart, settings.quietEnd)) return
-  const dueTasks = await env.hbkd1.prepare(`SELECT id, title, category, reminder_interval_minutes AS intervalMinutes
+  const dueTasks = await env.hbkd1.prepare(`SELECT id, title, category, reminder_interval_minutes AS intervalMinutes,
+    action_nonce AS actionNonce, action_api_url AS actionApiUrl
     FROM tasks WHERE status = 'pending' AND next_reminder_at <= ? ORDER BY next_reminder_at LIMIT 50`).bind(now).all<{
-      id: string; title: string; category: string; intervalMinutes: number
+      id: string; title: string; category: string; intervalMinutes: number; actionNonce: string | null; actionApiUrl: string
     }>()
   if (!dueTasks.results.length) return
 
@@ -378,14 +453,17 @@ async function processDueReminders(env: Env): Promise<void> {
 
   for (const task of dueTasks.results) {
     // Claim each due task before sending so overlapping cron runs cannot duplicate a reminder.
-    const claim = await env.hbkd1.prepare(`UPDATE tasks SET next_reminder_at = ?, reminder_count = reminder_count + 1, updated_at = ?
+    const actionNonce = task.actionNonce ?? createActionNonce()
+    const claim = await env.hbkd1.prepare(`UPDATE tasks SET next_reminder_at = ?, reminder_count = reminder_count + 1, updated_at = ?, action_nonce = COALESCE(action_nonce, ?)
       WHERE id = ? AND status = 'pending' AND next_reminder_at <= ?`)
-      .bind(now + task.intervalMinutes * 60_000, now, task.id, now).run()
+      .bind(now + task.intervalMinutes * 60_000, now, actionNonce, task.id, now).run()
     if (!claim.meta.changes) continue
+    const claimed = await env.hbkd1.prepare('SELECT action_nonce AS actionNonce, action_api_url AS actionApiUrl FROM tasks WHERE id = ?').bind(task.id).first<{ actionNonce: string | null; actionApiUrl: string }>()
+    const deliverable = { ...task, actionNonce: claimed?.actionNonce ?? actionNonce, actionApiUrl: claimed?.actionApiUrl ?? task.actionApiUrl }
 
     for (const subscription of subscriptions.results) {
       try {
-        const status = await sendReminder(env, task, subscription, settings)
+        const status = await sendReminder(env, deliverable, subscription, settings)
         if (status === 404 || status === 410) {
           await env.hbkd1.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').bind(subscription.endpoint).run()
         } else if (status < 200 || status >= 300) {

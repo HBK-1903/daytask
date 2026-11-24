@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { constantTimeEqual, generateRecoveryCode, hashCredential, incrementRateLimit, isValidNewPassword, normalizeEmail, normalizeRecoveryCode } from '../src/auth.ts'
+import { constantTimeEqual, generateRecoveryCode, hashCredential, incrementRateLimit, isValidNewPassword, signCapabilityToken, normalizeEmail, normalizeRecoveryCode } from '../src/auth.ts'
 
 test('email normalization trims spaces and uses a stable case-insensitive identifier', () => {
   assert.equal(normalizeEmail('  Sample.User@Example.com '), 'sample.user@example.com')
@@ -31,6 +31,16 @@ test('password and recovery credential hashes use per-credential salts', async (
   assert.equal(constantTimeEqual(first.hash, retry.hash), true)
   assert.equal(constantTimeEqual(first.hash, wrong.hash), false)
   assert.equal(constantTimeEqual(first.hash, `${first.hash}x`), false)
+})
+
+test('reminder action tokens are keyed capabilities bound to a specific task and nonce', async () => {
+  const a = await signCapabilityToken('local-session-secret', 'reminder', 'task-1', 'nonce-a')
+  const same = await signCapabilityToken('local-session-secret', 'reminder', 'task-1', 'nonce-a')
+  const otherNonce = await signCapabilityToken('local-session-secret', 'reminder', 'task-1', 'nonce-b')
+  const otherTask = await signCapabilityToken('local-session-secret', 'reminder', 'task-2', 'nonce-a')
+  assert.equal(a, same)
+  assert.notEqual(a, otherNonce)
+  assert.notEqual(a, otherTask)
 })
 
 test('rate limiting increments a fixed window and resets at the next window', async () => {

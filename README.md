@@ -40,7 +40,7 @@ Worker API, D1 ve gerekli gizli değerler yapılandırılıp dağıtılmadıkça
 
 ## Hatırlatmalar
 
-Hatırlatmalar kullanıcı açıkça etkinleştirirse Web Push kullanır. Worker Cron görevi zamanında başlar ve görev tamamlanana, ertelenene, arşivlenene ya da silinene kadar beş dakikalık aralıklarla yeniden dener. Sessiz saatler `Europe/Istanbul` saat diliminde uygulanır; kilit ekranı gizliliği ve metin seçimi Ayarlar'dan yönetilir. Push teslimatı tarayıcı/işletim sistemi tarafından geciktirilebilir veya engellenebilir; kesin teslimat garantisi yoktur. Push kurulumu için Worker/VAPID sırlarının yapılandırılması gerekir.
+Hatırlatmalar kullanıcı açıkça etkinleştirirse Web Push kullanır. Worker Cron görevi zamanında başlar ve görev tamamlanana, ertelenene ya da arşivlenene kadar beş dakikalık aralıklarla yeniden dener. Desteklenen bildirimlerde “Tamamlandı”, “10 dk ertele” ve “Kapat” aksiyonları tek kullanımlık imzalı görev yetkisiyle işlenir; bildirime dokunmak görevi uygulamada açar. Sessiz saatler `Europe/Istanbul` saat diliminde uygulanır; kilit ekranı gizliliği ve metin seçimi Ayarlar'dan yönetilir. Ayarlar'daki test düğmesi gerçek bir push gönderim denemesi yapar. Push teslimatı tarayıcı/işletim sistemi tarafından geciktirilebilir veya engellenebilir; kesin teslimat garantisi yoktur. Push kurulumu için Worker/VAPID sırlarının yapılandırılması ve `worker/README.md` içindeki D1 migration'larının onaylı uygulanması gerekir.
 
 ## Yerel veri
 

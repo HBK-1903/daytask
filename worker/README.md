@@ -53,6 +53,8 @@ The API will be available at the Worker's `workers.dev` URL. A Cron Trigger is c
 - `POST /api/auth/session` — legacy `APP_PASSWORD` session exchange before an account is created; disabled after account setup
 - `GET /api/push/public-key` — public VAPID key for browser subscription
 - `POST /api/push/subscribe` / `DELETE /api/push/subscribe` — save/remove a push subscription (authenticated)
+- `POST /api/push/test` — send an explicitly requested test push to active subscriptions (authenticated)
+- `POST /api/reminders/action` — apply a one-use HMAC-capability action from a notification (complete, snooze 10 minutes, dismiss); no account token is embedded in the notification
 - `GET /api/tasks`, `POST /api/tasks`, `PATCH /api/tasks/:id` — reminder task API (authenticated)
 
 The API requires an exact allowed origin and authenticated sessions for private routes. CORS is not a substitute for authentication. Push delivery is best-effort; browser and operating-system behavior can delay or suppress notifications.
@@ -62,7 +64,7 @@ Additional routes:
 - `GET /api/sync` and `PUT /api/sync` — retrieve/store one encrypted personal backup envelope (authenticated). The browser encrypts with PBKDF2-SHA-256 and AES-GCM before upload; D1 stores only `salt`, `iv`, and ciphertext. The sync passphrase is never sent to this Worker. Each explicit upload replaces the previous cloud envelope; there is no record-level merge or automatic/background sync.
 - `GET /api/reminders/settings` and `PUT /api/reminders/settings` — store quiet-hour, wording, and lock-screen privacy choices (authenticated). Quiet hours use `Europe/Istanbul`.
 
-Migration `0002_sync_and_reminder_settings.sql` adds the encrypted vault and reminder settings tables; migration `0003_personal_account_auth.sql` adds the one-account credential and rate-limit tables. Both must be applied to the existing `hbkdaytask` database before their routes can work. Do not apply these remotely until the target database is reviewed and the owner explicitly approves the live migration:
+Migration `0002_sync_and_reminder_settings.sql` adds the encrypted vault and reminder settings tables; migration `0003_personal_account_auth.sql` adds the one-account credential and rate-limit tables; migration `0004_reminder_action_capabilities.sql` adds one-use push-action capabilities. All pending migrations must be applied to the existing `hbkdaytask` database before their routes can work. Do not apply these remotely until the target database is reviewed and the owner explicitly approves the live migration:
 
 ```bash
 npx wrangler d1 migrations apply hbkdaytask --remote

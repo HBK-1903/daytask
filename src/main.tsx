@@ -10,6 +10,7 @@ import './backlog.css'
 import './roadmap.css'
 import './review-habits.css'
 import './account.css'
+import './notifications.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode><App /></React.StrictMode>,
