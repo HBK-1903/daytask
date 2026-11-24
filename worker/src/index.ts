@@ -1,5 +1,5 @@
 import { buildPushPayload, type PushSubscription as WebPushSubscription, type VapidKeys } from '@block65/webcrypto-web-push'
-import { constantTimeEqual, generateRecoveryCode, hashCredential, incrementRateLimit, isValidNewPassword, makeRateLimitBucket, normalizeEmail, normalizeRecoveryCode, signCapabilityToken } from './auth'
+import { ACCOUNT_SESSION_LIFETIME_MS, constantTimeEqual, generateRecoveryCode, hashCredential, incrementRateLimit, isSessionRenewalDue, isValidNewPassword, makeRateLimitBucket, normalizeEmail, normalizeRecoveryCode, signCapabilityToken } from './auth'
 
 interface Env {
   hbkd1: D1Database
@@ -12,7 +12,7 @@ interface Env {
   VAPID_PRIVATE_KEY: string
 }
 
-interface SessionClaims { sub: 'owner'; exp: number; ver: number }
+interface SessionClaims { sub: 'owner'; iat?: number; exp: number; ver: number }
 interface PushSubInput { endpoint: string; expirationTime?: number | null; keys: { p256dh: string; auth: string } }
 interface TaskInput {
   id: string
@@ -60,6 +60,7 @@ function corsHeaders(request: Request, env: Env): Headers {
 
 function response(request: Request, env: Env, body: unknown, status = 200): Response {
   const headers = corsHeaders(request, env)
+  headers.set('cache-control', 'no-store')
   for (const [key, value] of Object.entries(jsonHeaders)) headers.set(key, value)
   return new Response(JSON.stringify(body), { status, headers })
 }
@@ -70,9 +71,10 @@ function isOriginAllowed(request: Request, env: Env): boolean {
   return (env.APP_ORIGIN || '').split(',').map((item) => item.trim()).includes(origin)
 }
 
-async function signSession(env: Env, sessionVersion = 0): Promise<string> {
+async function signSession(env: Env, sessionVersion = 0, nowMs = Date.now()): Promise<string> {
   const header = encodeBase64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
-  const payload = encodeBase64Url(JSON.stringify({ sub: 'owner', ver: sessionVersion, exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7 } satisfies SessionClaims))
+  const issuedAt = Math.floor(nowMs / 1000)
+  const payload = encodeBase64Url(JSON.stringify({ sub: 'owner', ver: sessionVersion, iat: issuedAt, exp: issuedAt + Math.floor(ACCOUNT_SESSION_LIFETIME_MS / 1000) } satisfies SessionClaims))
   const content = `${header}.${payload}`
   const key = await crypto.subtle.importKey('raw', encoder.encode(env.SESSION_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
   const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(content))
@@ -194,7 +196,7 @@ async function route(request: Request, env: Env): Promise<Response> {
     } catch {
       return response(request, env, { error: 'Hesap oluşturulamadı; daha önce oluşturulmuş olabilir.' }, 409)
     }
-    return response(request, env, { token: await signSession(env, 1), email, recoveryCode, expiresIn: 604800 }, 201)
+    return response(request, env, { token: await signSession(env, 1), email, recoveryCode, expiresIn: Math.floor(ACCOUNT_SESSION_LIFETIME_MS / 1000) }, 201)
   }
 
   if (path === '/api/auth/login' && request.method === 'POST') {
@@ -209,7 +211,25 @@ async function route(request: Request, env: Env): Promise<Response> {
     }
     const candidate = await hashCredential(payload.password, account.passwordSalt)
     if (!constantTimeEqual(candidate.hash, account.passwordHash)) return response(request, env, { error: 'E-posta veya parola yanlış.' }, 401)
-    return response(request, env, { token: await signSession(env, account.sessionVersion), email: account.email, expiresIn: 604800 })
+    return response(request, env, { token: await signSession(env, account.sessionVersion), email: account.email, expiresIn: Math.floor(ACCOUNT_SESSION_LIFETIME_MS / 1000) })
+  }
+
+  if (path === '/api/auth/refresh' && request.method === 'POST') {
+    if (!env.SESSION_SECRET) return response(request, env, { error: 'Oturum yenileme yapılandırılmamış.' }, 503)
+    const token = request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '') ?? ''
+    if (!token || !(await hasValidSession(request, env))) return response(request, env, { error: 'Oturum sona ermiş. Yeniden giriş yap.' }, 401)
+    try {
+      const claims = JSON.parse(new TextDecoder().decode(decodeBase64Url(token.split('.')[1]))) as Partial<SessionClaims>
+      const nowMs = Date.now()
+      if (typeof claims.exp !== 'number' || typeof claims.ver !== 'number') return response(request, env, { error: 'Oturum geçersiz. Yeniden giriş yap.' }, 401)
+      if (!isSessionRenewalDue(claims.iat, nowMs)) {
+        return response(request, env, { ok: true, refreshed: false, expiresAt: claims.exp * 1000, refreshAt: (claims.iat! + 25 * 24 * 60 * 60) * 1000 })
+      }
+      const nextToken = await signSession(env, claims.ver, nowMs)
+      return response(request, env, { ok: true, refreshed: true, token: nextToken, expiresIn: Math.floor(ACCOUNT_SESSION_LIFETIME_MS / 1000), expiresAt: nowMs + ACCOUNT_SESSION_LIFETIME_MS })
+    } catch {
+      return response(request, env, { error: 'Oturum yenilenemedi. Yeniden giriş yap.' }, 401)
+    }
   }
 
   if (path === '/api/auth/recover' && request.method === 'POST') {
@@ -231,7 +251,7 @@ async function route(request: Request, env: Env): Promise<Response> {
     const nextVersion = account.sessionVersion + 1
     await env.hbkd1.prepare(`UPDATE user_account SET password_salt = ?, password_hash = ?, recovery_salt = ?, recovery_hash = ?, session_version = ?, updated_at = ? WHERE id = ?`)
       .bind(newPassword.salt, newPassword.hash, nextRecoveryRecord.salt, nextRecoveryRecord.hash, nextVersion, Date.now(), 'owner').run()
-    return response(request, env, { token: await signSession(env, nextVersion), email: account.email, recoveryCode: nextRecoveryCode, expiresIn: 604800 })
+    return response(request, env, { token: await signSession(env, nextVersion), email: account.email, recoveryCode: nextRecoveryCode, expiresIn: Math.floor(ACCOUNT_SESSION_LIFETIME_MS / 1000) })
   }
 
   if (path === '/api/auth/session' && request.method === 'POST') {
@@ -243,7 +263,7 @@ async function route(request: Request, env: Env): Promise<Response> {
     if (typeof payload?.password !== 'string' || !constantTimeEqual(payload.password, env.APP_PASSWORD)) {
       return response(request, env, { error: 'Parola yanlış.' }, 401)
     }
-    return response(request, env, { token: await signSession(env), expiresIn: 604800 })
+    return response(request, env, { token: await signSession(env), expiresIn: Math.floor(ACCOUNT_SESSION_LIFETIME_MS / 1000) })
   }
 
   if (path === '/api/reminders/action' && request.method === 'POST') {

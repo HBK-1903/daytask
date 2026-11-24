@@ -222,9 +222,11 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [syncApiUrl, setSyncApiUrl] = useState(() => readStored('vf-sync-api', 'https://daytask.hasanbekirk02.workers.dev'))
   const [syncToken, setSyncToken] = useState(() => readStored('vf-sync-token', ''))
+  const [authGateState, setAuthGateState] = useState<'checking' | 'required' | 'ready'>('checking')
+  const [accountGateMessage, setAccountGateMessage] = useState('')
   const [syncPassword, setSyncPassword] = useState('')
-  const [accountEmail, setAccountEmail] = useState('')
-  const [accountMode, setAccountMode] = useState<'login' | 'register' | 'recover'>('login')
+  const [accountEmail, setAccountEmail] = useState(() => readStored('vf-account-email', ''))
+  const [accountMode, setAccountMode] = useState<'login' | 'register' | 'recover'>(() => readStored('vf-account-email', '') ? 'login' : 'register')
   const [accountSetupKey, setAccountSetupKey] = useState('')
   const [accountRecoveryCodeInput, setAccountRecoveryCodeInput] = useState('')
   const [accountNewPassword, setAccountNewPassword] = useState('')
@@ -296,6 +298,19 @@ function App() {
   useEffect(() => { localStorage.setItem('vf-custom-categories', JSON.stringify(customCategories)) }, [customCategories])
   useEffect(() => { localStorage.setItem('vf-sync-api', JSON.stringify(syncApiUrl)) }, [syncApiUrl])
   useEffect(() => { localStorage.setItem('vf-sync-token', JSON.stringify(syncToken)) }, [syncToken])
+  useEffect(() => { localStorage.setItem('vf-account-email', JSON.stringify(accountEmail)) }, [accountEmail])
+  useEffect(() => {
+    if (!syncToken) { setAuthGateState('required'); return }
+    setAuthGateState('ready')
+    void refreshAccountSession(syncToken)
+  }, [])
+  useEffect(() => {
+    if (!syncToken || authGateState !== 'ready') return
+    const checkRenewal = () => { if (document.visibilityState === 'visible') void refreshAccountSession(syncToken) }
+    const timer = window.setInterval(checkRenewal, 24 * 60 * 60_000)
+    window.addEventListener('focus', checkRenewal)
+    return () => { window.clearInterval(timer); window.removeEventListener('focus', checkRenewal) }
+  }, [syncToken, authGateState])
   useEffect(() => { localStorage.setItem('vf-reminders-enabled', JSON.stringify(remindersOn)) }, [remindersOn])
   useEffect(() => {
     const refreshPushState = async () => {
@@ -1046,6 +1061,29 @@ function App() {
     if (backup.settings?.recommendationEnergy && ['light','steady','deep'].includes(backup.settings.recommendationEnergy)) setRecommendationEnergy(backup.settings.recommendationEnergy)
     setFocusTaskId(null)
   }
+  async function refreshAccountSession(token = syncToken): Promise<boolean> {
+    if (!token) return false
+    try {
+      const response = await fetch(`${syncApiUrl}/api/auth/refresh`, { method: 'POST', headers: { authorization: `Bearer ${token}` } })
+      const result = await response.json() as { ok?: boolean; token?: string; refreshed?: boolean; error?: string; expiresAt?: number; refreshAt?: number }
+      if (response.status === 401) {
+        setSyncToken('')
+        setAuthGateState('required')
+        setAccountGateMessage('Oturumun sona ermiş. Devam etmek için giriş yap.')
+        return false
+      }
+      if (!response.ok) {
+        setAccountGateMessage(result.error ?? 'Oturum doğrulanamadı. İnternet bağlantısını kontrol et.')
+        return false
+      }
+      if (result.token) setSyncToken(result.token)
+      setAccountGateMessage('')
+      return true
+    } catch {
+      setAccountGateMessage('Şu an çevrimdışısın. Bu cihazdaki planların açıldı; hesap bağlantısı internet gelince yenilenecek.')
+      return false
+    }
+  }
   async function connectCloudSync(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault()
     try {
@@ -1062,6 +1100,8 @@ function App() {
       const result = await response.json() as { token?: string; email?: string; recoveryCode?: string; error?: string }
       if (!response.ok || !result.token) throw new Error(result.error ?? 'Hesap bağlantısı kurulamadı.')
       setSyncToken(result.token)
+      setAuthGateState('ready')
+      setAccountGateMessage('')
       setAccountEmail(result.email ?? accountEmail.trim())
       setSyncPassword('')
       setAccountSetupKey('')
@@ -1070,7 +1110,11 @@ function App() {
       setSyncStatus(result.recoveryCode ? 'Hesap hazır. Kurtarma kodunu şimdi güvenli bir yere kaydet.' : 'Hesap oturumu açıldı. Planlar eşitleme onayın olmadan gönderilmez.')
       if (result.recoveryCode) { setPendingRecoveryCode(result.recoveryCode); setRecoveryCodeSaved(false) }
       setAccountMode('login')
-    } catch (error) { setSyncStatus(error instanceof Error ? error.message : 'Hesap bağlantısı kurulamadı.') }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Hesap bağlantısı kurulamadı.'
+      setSyncStatus(message)
+      setAccountGateMessage(message)
+    }
   }
   async function copyAccountRecoveryCode() {
     if (!pendingRecoveryCode) return
@@ -1118,6 +1162,8 @@ function App() {
   }
   function disconnectCloudSync() {
     setSyncToken('')
+    setAuthGateState('required')
+    setAccountGateMessage('Oturum kapatıldı. Devam etmek için yeniden giriş yap.')
     setSyncPassphrase('')
     setSyncStatus('Bu cihaz bulut oturumundan çıkarıldı; sunucudaki şifreli yedek korunuyor.')
   }
@@ -1148,7 +1194,16 @@ function App() {
   }
 
   return (
-    <div className="app-shell">
+    <>
+    {authGateState !== 'ready' && <main className="account-gate"><div className="account-gate-card"><div className="account-gate-brand"><span className="brand-mark"><Sparkles size={19} /></span><span><b>violet<span>focus</span></b><small>GÜNÜNÜN RİTMİ</small></span></div>{authGateState === 'checking' ? <div className="account-gate-loading"><span className="account-gate-spinner" /><h1>Çalışma alanın açılıyor</h1><p>Oturumun ve yenileme zamanın kontrol ediliyor.</p></div> : <><div className="account-gate-intro"><span className="section-kicker">KİŞİSEL ÇALIŞMA ALANIN</span><h1>{accountMode === 'register' ? 'Önce hesabını oluşturalım.' : accountMode === 'recover' ? 'Hesabına yeniden eriş.' : 'Tekrar hoş geldin.'}</h1><p>{accountMode === 'register' ? 'Kayıt veya giriş yapmadan çalışma alanı açılmaz. Planların bu cihazda kalır; bulut eşitleme ayrıca ve yalnızca sen başlatınca yapılır.' : 'Giriş yaptıktan sonra bu cihazdaki çalışma alanına devam edebilirsin.'}</p></div><form className="account-gate-form" onSubmit={connectCloudSync}>
+      <label htmlFor="gate-api-url">Worker API adresi<input id="gate-api-url" type="url" value={syncApiUrl} onChange={(event) => setSyncApiUrl(event.target.value)} required placeholder="https://…workers.dev" autoCapitalize="none" autoCorrect="off" /></label>
+      <label htmlFor="gate-account-email">E-posta<input id="gate-account-email" type="email" autoComplete="email" maxLength={254} value={accountEmail} onChange={(event) => setAccountEmail(event.target.value)} required placeholder="ornek@email.com" /></label>
+      {accountMode === 'recover' ? <><label htmlFor="gate-recovery-code">Kurtarma kodu<input id="gate-recovery-code" autoComplete="off" value={accountRecoveryCodeInput} onChange={(event) => setAccountRecoveryCodeInput(event.target.value)} required /></label><label htmlFor="gate-new-password">Yeni parola <small>En az 12 karakter</small><input id="gate-new-password" type="password" autoComplete="new-password" minLength={12} maxLength={128} value={accountNewPassword} onChange={(event) => setAccountNewPassword(event.target.value)} required /></label></> : <><label htmlFor="gate-password">{accountMode === 'register' ? 'Hesap parolası' : 'Parola'}{accountMode === 'register' && <small>En az 12 karakter</small>}<input id="gate-password" type="password" autoComplete={accountMode === 'register' ? 'new-password' : 'current-password'} minLength={accountMode === 'register' ? 12 : undefined} maxLength={128} value={syncPassword} onChange={(event) => setSyncPassword(event.target.value)} required /></label>{accountMode === 'register' && <label htmlFor="gate-setup-key">İlk hesap kurulum anahtarı <small>Worker sahibi tarafından güvenli şekilde paylaşılır.</small><input id="gate-setup-key" type="password" autoComplete="off" value={accountSetupKey} onChange={(event) => setAccountSetupKey(event.target.value)} required /></label>}</>}
+      <button type="submit" className="start-button account-gate-submit">{accountMode === 'recover' ? 'Kurtarma koduyla devam et' : accountMode === 'register' ? 'Hesabımı oluştur' : 'Giriş yap'}</button>
+      <div className="account-gate-links">{accountMode === 'register' ? <button type="button" onClick={() => setAccountMode('login')}>Hesabım var, giriş yap</button> : accountMode === 'login' ? <button type="button" onClick={() => setAccountMode('register')}>İlk hesabımı oluştur</button> : null}<button type="button" onClick={() => setAccountMode(accountMode === 'recover' ? 'login' : 'recover')}>{accountMode === 'recover' ? 'Girişe dön' : 'Kurtarma kodu kullan'}</button></div>
+    </form>{accountGateMessage && <div className="account-gate-message" role="status">{accountGateMessage}</div>}<p className="account-gate-foot"><ShieldCheck size={14} /> E-posta doğrulama e-postası gönderilmez. Oturum yaklaşık ayda bir yenilenir; 35 gün boyunca hiç bağlanamazsa yeniden giriş istenir.</p></>}</div></main>}
+    {authGateState === 'ready' && <div className="app-shell">
+      {accountGateMessage && <div className="account-session-notice" role="status"><span>{accountGateMessage}</span><button type="button" onClick={() => setAccountGateMessage('')} aria-label="Mesajı kapat"><X size={15} /></button></div>}
       <aside className={`sidebar ${mobileMenu ? 'sidebar-open' : ''}`}>
         <div className="brand-lockup"><div className="brand-mark"><Sparkles size={19} strokeWidth={2.2} /></div><div><strong>violet<span>focus</span></strong><small>GÜNÜNÜN RİTMİ</small></div><button className="icon-button sidebar-close" onClick={() => setMobileMenu(false)} aria-label="Menüyü kapat"><X size={18} /></button></div>
         <button className="profile-switch" onClick={openProfileEditor} aria-label="Profilini düzenle"><div className={`avatar avatar-tone-${profileAvatarTheme}`}>{profileAvatar ? <img src={profileAvatar} alt="" /> : profileInitial}</div><span><b>{profileName}</b><small>Kişisel çalışma alanı · Profili düzenle</small></span><ChevronDown size={16} /></button>
@@ -1284,7 +1339,8 @@ function App() {
       {goalModalOpen && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setGoalModalOpen(false) }}><form className="task-modal" onSubmit={addLearningGoal}><div className="modal-top"><div className="planner-heading"><span className="planner-mark"><Target size={18} /></span><div><span className="section-kicker">ÖĞRENME YOLCULUĞU</span><h2>Yeni hedef oluştur</h2><p>Başlamak için bir hedef ve ilk adımını tanımla.</p></div></div><button type="button" className="icon-button" onClick={() => setGoalModalOpen(false)} aria-label="Kapat"><X size={19} /></button></div><label htmlFor="goal-title">Ne öğrenmek istiyorsun?</label><input id="goal-title" autoFocus required maxLength={70} placeholder="Örn. Temel fotoğrafçılık" value={goalTitle} onChange={(event) => setGoalTitle(event.target.value)} /><label htmlFor="goal-description">Hedefinin açıklaması <span>İsteğe bağlı</span></label><textarea id="goal-description" maxLength={160} placeholder="Bu hedef senin için neden önemli?" value={goalDescription} onChange={(event) => setGoalDescription(event.target.value)} /><label htmlFor="goal-first-step">İlk milestone <span>İsteğe bağlı</span></label><input id="goal-first-step" maxLength={70} placeholder="Örn. Kamera ayarlarını öğren" value={goalFirstMilestone} onChange={(event) => setGoalFirstMilestone(event.target.value)} /><div className="modal-note"><ShieldCheck size={15} /> İlerleme yalnızca tamamladığın adımlara göre hesaplanır.</div><button type="submit" className="start-button modal-submit"><Plus size={16} /> Hedefi oluştur</button></form></div>}
       {pendingMove && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setPendingMove(null) }}><div className="task-modal move-confirm-modal" role="dialog" aria-modal="true" aria-labelledby="move-confirm-title"><div className="modal-top"><div className="planner-heading"><span className="planner-mark"><CalendarDays size={18} /></span><div><span className="section-kicker">TAKVİM DEĞİŞİKLİĞİ</span><h2 id="move-confirm-title">Görevi taşıyalım mı?</h2><p>Görev ve saat, yalnızca onayından sonra değişir.</p></div></div><button type="button" className="icon-button" onClick={() => setPendingMove(null)} aria-label="Kapat"><X size={19} /></button></div><div className="move-preview"><div><small>ŞİMDİ</small><b>{new Intl.DateTimeFormat('tr-TR', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${pendingMove.originalDate}T00:00:00`))}</b><span>{pendingMove.originalTime}</span></div><ArrowRight size={17} /><div><small>YENİ PLAN</small><b>{new Intl.DateTimeFormat('tr-TR', { weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${pendingMove.targetDate}T00:00:00`))}</b><span>{pendingMove.targetTime ?? pendingMove.originalTime}</span></div></div><div className="move-task-name">{tasks.find((task) => task.id === pendingMove.taskId)?.title}</div><div className="planner-actions"><button className="planner-back" onClick={() => setPendingMove(null)}>Vazgeç</button><button className="start-button planner-next" onClick={confirmTaskMove}>Evet, bu plana taşı</button></div></div></div>}
       {toast && <div className="toast" role="status" aria-live="polite"><span><Check size={15} /></span>{toast}{undoAction && (toast === 'Görev silindi.' || toast === 'Görev 10 dakika ertelendi.') && <button onClick={undoTaskChange}><Undo2 size={14} /> Geri al</button>}</div>}
-    </div>
+    </div>}
+    </>
   )
 }
 

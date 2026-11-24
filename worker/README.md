@@ -47,8 +47,9 @@ The API will be available at the Worker's `workers.dev` URL. Keep `APP_API_ORIGI
 ## API
 
 - `GET /api/health` — health check
-- `POST /api/auth/register` — one-time personal account setup with email, account password, and `APP_PASSWORD` setup key; returns a seven-day session and a one-time recovery code
-- `POST /api/auth/login` — sign in with email and account password
+- `POST /api/auth/register` — one-time personal account setup with email, account password, and `APP_PASSWORD` setup key; returns a 35-day session and a one-time recovery code
+- `POST /api/auth/login` — sign in with email and account password (35-day session)
+- `POST /api/auth/refresh` — validate the current session and issue a new signed token after 25 days; it is checked during app use, with reauthentication required after 35 days without a successful renewal. Previously issued JWTs remain valid until their original expiry or account-wide revocation.
 - `POST /api/auth/recover` — reset the account password with the offline recovery code; rotates the code and revokes old sessions
 - `POST /api/auth/session` — legacy `APP_PASSWORD` session exchange before an account is created; disabled after account setup
 - `GET /api/push/public-key` — public VAPID key for browser subscription
