@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { getElapsedSeconds, getHabitCalendarState, getHabitWeekMetrics, isHabitScheduledOnWeekday, getReminderSyncFailure, getSnoozeDate, isTaskCountableForAnalytics } from '../.test-dist/domain.js'
 import { parseQuickTaskInput } from '../.test-dist/quickAdd.js'
 import { getSessionExpiryMs, isSessionExpiredLocally } from '../.test-dist/session.js'
+import { getNextOccurrenceDate } from '../.test-dist/repeat.js'
 
 test('habit calendar separates completed, planned-missed, today, upcoming, and off-schedule dates', () => {
   assert.equal(getHabitCalendarState('2026-10-26', '2026-10-30', true, 'selectedDays', [1, 3, 5]), 'completed')
@@ -28,6 +29,19 @@ test('weekly habit progress is derived from unique check dates and its own targe
 test('habit progress is capped and invalid targets use a safe default', () => {
   assert.deepEqual(getHabitWeekMetrics(['2026-10-26', '2026-10-27'], 1, ['2026-10-26', '2026-10-27']), { checkCount: 2, target: 1, progress: 100 })
   assert.deepEqual(getHabitWeekMetrics([], 0, []), { checkCount: 0, target: 7, progress: 0 })
+})
+
+test('recurring tasks create the next future occurrence without generating overdue missed instances', () => {
+  const completeOn = new Date(2026, 9, 30, 14).getTime()
+  assert.equal(getNextOccurrenceDate('2026-10-30', 'daily', completeOn), '2026-10-31')
+  assert.equal(getNextOccurrenceDate('2026-10-26', 'weekly', completeOn), '2026-11-02')
+  assert.equal(getNextOccurrenceDate('2026-10-01', 'weekly', completeOn), '2026-11-05')
+})
+
+test('monthly recurrence preserves its original day and clamps short months safely', () => {
+  const completed = new Date(2026, 0, 31, 10).getTime()
+  assert.equal(getNextOccurrenceDate('2026-01-31', 'monthly', completed, 31), '2026-02-28')
+  assert.equal(getNextOccurrenceDate('2026-02-28', 'monthly', completed, 31), '2026-03-31')
 })
 
 test('local session expiry check handles valid, expired, and malformed JWT payloads', () => {

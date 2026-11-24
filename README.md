@@ -46,6 +46,12 @@ Worker API, D1 ve gerekli gizli değerler yapılandırılıp dağıtılmadıkça
 
 Ana ekrandaki zaman akışı artık tüm bugünkü görevleri genişletebilir ve **Tümü / Açık / Tamamlanan** görünümleri arasında geçiş yapar. Her satırdan görevi tamamlayabilir, yeniden açabilir veya düzenleyebilirsin. İlk tamamlanmamış görevin saati geçtiyse bu plan otomatik değiştirilmez; görev günlük gözden geçirmede kalır. 6,1 inç telefon ekranında metin ve dokunma hedefleri daha rahat okunacak/erişilecek ölçülere çıkarılır; küçük ekranlar için daraltılmış düzen de korunur.
 
+## Görevler, projeler ve gün değerlendirmesi
+
+Göreve isteğe bağlı bir proje adı, en çok 40 kontrol adımı ve günlük/haftalık/aylık tekrar kuralı eklenebilir. Proje adları yeni görevlerde tamamlanırken önerilir; görevler aramada proje adına göre bulunur. Tekrarlı görev için sonraki kopya yalnızca mevcut görev tamamlandığında oluşturulur. Tarihi geçmiş tekrarlar geriye dönük yığılmaz; sıradaki gelecek tarih hesaplanır. Kontrol adımları yeni kopyada yeniden işaretlenmemiş olur. Hiçbir açık görev otomatik olarak başka güne taşınmaz.
+
+**Günü gözden geçir** özeti tamamlananları, kalanları ve kaydedilmiş odak süresini gösterir. Açık görevi tamamlayabilir, düzenleyebilir veya yarına taşıma önerisi verebilirsin; taşıma mevcut onay ekranı olmadan gerçekleşmez.
+
 ## Hızlı görev yakalama
 
 Ana ekrandaki **Hızlı ekle** alanı ve `N` kısayolu, akıldaki işi ayrıntılı planlama adımına girmeden yakalar. Türkçe “bugün”, “yarın”, “öbür gün”, hafta günü ve `14:30` / “saat 14” biçimlerini yorumlar. Görev kaydedilmeden önce başlık, tarih ve saat önizlemesi gösterilir; ifade anlaşılmadığında varsayılan bugün 18:00 kullanılır. `/` kısayolu görev aramasını açar. Tarih yorumu kullanıcı onayı olmadan görev oluşturmaz ve diğer görevleri taşımaz.

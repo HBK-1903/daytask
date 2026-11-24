@@ -14,6 +14,7 @@ import './notifications.css'
 import './quick-add.css'
 import './day-planner.css'
 import './session-gate.css'
+import './review-repeat-project.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode><App /></React.StrictMode>,
