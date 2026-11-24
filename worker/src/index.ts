@@ -1,4 +1,5 @@
 import { buildPushPayload, type PushSubscription as WebPushSubscription, type VapidKeys } from '@block65/webcrypto-web-push'
+import { constantTimeEqual, generateRecoveryCode, hashCredential, incrementRateLimit, isValidNewPassword, makeRateLimitBucket, normalizeEmail, normalizeRecoveryCode } from './auth'
 
 interface Env {
   hbkd1: D1Database
@@ -10,7 +11,7 @@ interface Env {
   VAPID_PRIVATE_KEY: string
 }
 
-interface SessionClaims { sub: 'owner'; exp: number }
+interface SessionClaims { sub: 'owner'; exp: number; ver: number }
 interface PushSubInput { endpoint: string; expirationTime?: number | null; keys: { p256dh: string; auth: string } }
 interface TaskInput {
   id: string
@@ -67,9 +68,9 @@ function isOriginAllowed(request: Request, env: Env): boolean {
   return (env.APP_ORIGIN || '').split(',').map((item) => item.trim()).includes(origin)
 }
 
-async function signSession(env: Env): Promise<string> {
+async function signSession(env: Env, sessionVersion = 0): Promise<string> {
   const header = encodeBase64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
-  const payload = encodeBase64Url(JSON.stringify({ sub: 'owner', exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7 } satisfies SessionClaims))
+  const payload = encodeBase64Url(JSON.stringify({ sub: 'owner', ver: sessionVersion, exp: Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7 } satisfies SessionClaims))
   const content = `${header}.${payload}`
   const key = await crypto.subtle.importKey('raw', encoder.encode(env.SESSION_SECRET), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
   const signature = await crypto.subtle.sign('HMAC', key, encoder.encode(content))
@@ -89,8 +90,10 @@ async function hasValidSession(request: Request, env: Env): Promise<boolean> {
     signature.set(decodedSignature)
     const valid = await crypto.subtle.verify('HMAC', key, signature.buffer, encoder.encode(content))
     if (!valid) return false
-    const claims = JSON.parse(new TextDecoder().decode(decodeBase64Url(parts[1]))) as SessionClaims
-    return claims.sub === 'owner' && claims.exp > Math.floor(Date.now() / 1000)
+    const claims = JSON.parse(new TextDecoder().decode(decodeBase64Url(parts[1]))) as Partial<SessionClaims>
+    if (claims.sub !== 'owner' || typeof claims.exp !== 'number' || claims.exp <= Math.floor(Date.now() / 1000)) return false
+    const account = await env.hbkd1.prepare('SELECT session_version AS sessionVersion FROM user_account WHERE id = ?').bind('owner').first<{ sessionVersion: number }>()
+    return account ? claims.ver === account.sessionVersion : claims.ver === 0 || claims.ver === undefined
   } catch {
     return false
   }
@@ -135,6 +138,14 @@ async function requireSession(request: Request, env: Env): Promise<Response | nu
   return response(request, env, { error: 'Oturum gerekli.' }, 401)
 }
 
+async function accountRateLimited(request: Request, env: Env, scope: string): Promise<boolean> {
+  if (!env.SESSION_SECRET) return true
+  const address = request.headers.get('CF-Connecting-IP') ?? 'unknown-client'
+  const bucket = await makeRateLimitBucket(env.SESSION_SECRET, scope, address)
+  const attempts = await incrementRateLimit(env.hbkd1, bucket, Date.now(), 15 * 60_000)
+  return attempts > 10
+}
+
 async function route(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url)
   const path = url.pathname.replace(/\/+$/, '') || '/'
@@ -149,10 +160,73 @@ async function route(request: Request, env: Env): Promise<Response> {
     return response(request, env, { ok: true, service: 'violet-focus-api' })
   }
 
+  if (path === '/api/auth/register' && request.method === 'POST') {
+    if (!env.APP_PASSWORD || !env.SESSION_SECRET) return response(request, env, { error: 'Hesap kurulumu için Worker sırları eksik.' }, 503)
+    if (await accountRateLimited(request, env, 'register')) return response(request, env, { error: 'Çok fazla deneme yapıldı. 15 dakika sonra yeniden dene.' }, 429)
+    const payload = await request.json().catch(() => null) as { email?: unknown; password?: unknown; setupKey?: unknown } | null
+    const email = normalizeEmail(payload?.email)
+    if (!email || !isValidNewPassword(payload?.password) || typeof payload?.setupKey !== 'string') return response(request, env, { error: 'E-posta, en az 12 karakterli parola ve kurulum anahtarı gerekli.' }, 400)
+    if (!constantTimeEqual(payload.setupKey, env.APP_PASSWORD)) return response(request, env, { error: 'Kurulum anahtarı doğru değil.' }, 401)
+    const existing = await env.hbkd1.prepare('SELECT id FROM user_account WHERE id = ?').bind('owner').first<{ id: string }>()
+    if (existing) return response(request, env, { error: 'Kişisel hesap zaten oluşturulmuş. Giriş yap veya kurtarma kodunu kullan.' }, 409)
+    const passwordRecord = await hashCredential(payload.password)
+    const recoveryCode = generateRecoveryCode()
+    const recoveryRecord = await hashCredential(recoveryCode)
+    const now = Date.now()
+    try {
+      await env.hbkd1.prepare(`INSERT INTO user_account (id, email, email_normalized, password_salt, password_hash, recovery_salt, recovery_hash, session_version, created_at, updated_at)
+        VALUES ('owner', ?, ?, ?, ?, ?, ?, 1, ?, ?)`)
+        .bind(email, email, passwordRecord.salt, passwordRecord.hash, recoveryRecord.salt, recoveryRecord.hash, now, now).run()
+    } catch {
+      return response(request, env, { error: 'Hesap oluşturulamadı; daha önce oluşturulmuş olabilir.' }, 409)
+    }
+    return response(request, env, { token: await signSession(env, 1), email, recoveryCode, expiresIn: 604800 }, 201)
+  }
+
+  if (path === '/api/auth/login' && request.method === 'POST') {
+    if (await accountRateLimited(request, env, 'login')) return response(request, env, { error: 'Çok fazla deneme yapıldı. 15 dakika sonra yeniden dene.' }, 429)
+    const payload = await request.json().catch(() => null) as { email?: unknown; password?: unknown } | null
+    const email = normalizeEmail(payload?.email)
+    if (!email || typeof payload?.password !== 'string' || payload.password.length > 128) return response(request, env, { error: 'E-posta veya parola yanlış.' }, 401)
+    const account = await env.hbkd1.prepare('SELECT email, email_normalized AS emailNormalized, password_salt AS passwordSalt, password_hash AS passwordHash, session_version AS sessionVersion FROM user_account WHERE id = ?').bind('owner').first<{ email: string; emailNormalized: string; passwordSalt: string; passwordHash: string; sessionVersion: number }>()
+    if (!account || account.emailNormalized !== email) {
+      await hashCredential(payload.password, 'AAAAAAAAAAAAAAAAAAAAAA')
+      return response(request, env, { error: 'E-posta veya parola yanlış.' }, 401)
+    }
+    const candidate = await hashCredential(payload.password, account.passwordSalt)
+    if (!constantTimeEqual(candidate.hash, account.passwordHash)) return response(request, env, { error: 'E-posta veya parola yanlış.' }, 401)
+    return response(request, env, { token: await signSession(env, account.sessionVersion), email: account.email, expiresIn: 604800 })
+  }
+
+  if (path === '/api/auth/recover' && request.method === 'POST') {
+    if (await accountRateLimited(request, env, 'recover')) return response(request, env, { error: 'Çok fazla deneme yapıldı. 15 dakika sonra yeniden dene.' }, 429)
+    const payload = await request.json().catch(() => null) as { email?: unknown; recoveryCode?: unknown; newPassword?: unknown } | null
+    const email = normalizeEmail(payload?.email)
+    const recoveryCode = normalizeRecoveryCode(payload?.recoveryCode)
+    if (!email || !recoveryCode || !isValidNewPassword(payload?.newPassword)) return response(request, env, { error: 'E-posta, kurtarma kodu ve en az 12 karakterli yeni parola gerekli.' }, 400)
+    const account = await env.hbkd1.prepare('SELECT email, email_normalized AS emailNormalized, recovery_salt AS recoverySalt, recovery_hash AS recoveryHash, session_version AS sessionVersion FROM user_account WHERE id = ?').bind('owner').first<{ email: string; emailNormalized: string; recoverySalt: string; recoveryHash: string; sessionVersion: number }>()
+    if (!account || account.emailNormalized !== email) {
+      await hashCredential(recoveryCode, 'AAAAAAAAAAAAAAAAAAAAAA')
+      return response(request, env, { error: 'Bilgiler eşleşmedi. E-posta ve kurtarma kodunu kontrol et.' }, 401)
+    }
+    const candidate = await hashCredential(recoveryCode, account.recoverySalt)
+    if (!constantTimeEqual(candidate.hash, account.recoveryHash)) return response(request, env, { error: 'Bilgiler eşleşmedi. E-posta ve kurtarma kodunu kontrol et.' }, 401)
+    const newPassword = await hashCredential(payload.newPassword)
+    const nextRecoveryCode = generateRecoveryCode()
+    const nextRecoveryRecord = await hashCredential(nextRecoveryCode)
+    const nextVersion = account.sessionVersion + 1
+    await env.hbkd1.prepare(`UPDATE user_account SET password_salt = ?, password_hash = ?, recovery_salt = ?, recovery_hash = ?, session_version = ?, updated_at = ? WHERE id = ?`)
+      .bind(newPassword.salt, newPassword.hash, nextRecoveryRecord.salt, nextRecoveryRecord.hash, nextVersion, Date.now(), 'owner').run()
+    return response(request, env, { token: await signSession(env, nextVersion), email: account.email, recoveryCode: nextRecoveryCode, expiresIn: 604800 })
+  }
+
   if (path === '/api/auth/session' && request.method === 'POST') {
     if (!env.APP_PASSWORD || !env.SESSION_SECRET) return response(request, env, { error: 'Worker sırları henüz yapılandırılmamış.' }, 503)
+    const account = await env.hbkd1.prepare('SELECT session_version AS sessionVersion FROM user_account WHERE id = ?').bind('owner').first<{ sessionVersion: number }>()
+    if (account) return response(request, env, { error: 'Kişisel hesap etkin. E-posta ve parolanla giriş yap.' }, 410)
+    if (await accountRateLimited(request, env, 'legacy-session')) return response(request, env, { error: 'Çok fazla deneme yapıldı. 15 dakika sonra yeniden dene.' }, 429)
     const payload = await request.json().catch(() => null) as { password?: unknown } | null
-    if (typeof payload?.password !== 'string' || payload.password !== env.APP_PASSWORD) {
+    if (typeof payload?.password !== 'string' || !constantTimeEqual(payload.password, env.APP_PASSWORD)) {
       return response(request, env, { error: 'Parola yanlış.' }, 401)
     }
     return response(request, env, { token: await signSession(env), expiresIn: 604800 })

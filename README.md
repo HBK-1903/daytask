@@ -14,6 +14,7 @@ npm run dev
 ```bash
 npm run build
 npm test
+npm --prefix worker run test
 npm --prefix worker run typecheck
 ```
 
@@ -33,7 +34,7 @@ Uygulamanın **Ayarlar → Kestirmeler** bölümündeki düğmeler tam adresi pa
 
 ## Şifreli, isteğe bağlı eşitleme
 
-**Ayarlar → Şifreli bulut eşitleme** bölümünde Worker oturumu açılabilir. Buluta gönderme ve başka cihazdan geri yükleme ayrı düğmelerle ve onayla yapılır; otomatik/arka plan eşitlemesi yoktur. Yedek tarayıcıda PBKDF2-SHA-256 (310.000 tur) ve AES-GCM-256 ile şifrelenir. Eşitleme parolası sunucuya gönderilmez veya uygulamada saklanmaz. Worker yalnızca şifreli metni ve IV/salt bilgisini tutar. Parolayı kaybedersen şifreli yedek açılamaz. Her yeni gönderme mevcut bulut kopyasının yerini alır; iki cihazın değişikliklerini birleştirmez.
+**Ayarlar → Şifreli bulut eşitleme** bölümünde tek kişisel hesap oluşturulup e-posta ve hesap parolasıyla giriş yapılabilir. E-posta yalnızca giriş adıdır; doğrulama e-postası gönderilmez. İlk hesap için Worker'daki `APP_PASSWORD` kurulum anahtarı gerekir. Hesap kurtarma kodu bir kez gösterilir; parola sıfırlanınca yenilenir. Kodu çevrimdışı, güvenli bir yerde sakla; kodu kaybedersen hesap parolasını sıfırlamak mümkün olmaz. Planları buluta gönderme ve başka cihazdan geri yükleme ayrı düğmelerle ve onayla yapılır; otomatik/arka plan eşitlemesi yoktur. Yedek tarayıcıda PBKDF2-SHA-256 (310.000 tur) ve AES-GCM-256 ile şifrelenir. Eşitleme parolası sunucuya gönderilmez veya uygulamada saklanmaz. Worker yalnızca şifreli metni ve IV/salt bilgisini tutar. Her yeni gönderme mevcut bulut kopyasının yerini alır; iki cihazın değişikliklerini birleştirmez.
 
 Worker API, D1 ve gerekli gizli değerler yapılandırılıp dağıtılmadıkça eşitleme etkinleştirilemez. Kurulum adımları `worker/README.md` içindedir. Kod değişikliği tek başına canlı servisi dağıtmaz veya herhangi bir veriyi buluta göndermez.
 
