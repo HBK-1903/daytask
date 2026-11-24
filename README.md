@@ -38,6 +38,10 @@ Uygulamanın **Ayarlar → Kestirmeler** bölümündeki düğmeler tam adresi pa
 
 Worker API, D1 ve gerekli gizli değerler yapılandırılıp dağıtılmadıkça eşitleme etkinleştirilemez. Kurulum adımları `worker/README.md` içindedir. Kod değişikliği tek başına canlı servisi dağıtmaz veya herhangi bir veriyi buluta göndermez.
 
+## Hızlı görev yakalama
+
+Ana ekrandaki **Hızlı ekle** alanı ve `N` kısayolu, akıldaki işi ayrıntılı planlama adımına girmeden yakalar. Türkçe “bugün”, “yarın”, “öbür gün”, hafta günü ve `14:30` / “saat 14” biçimlerini yorumlar. Görev kaydedilmeden önce başlık, tarih ve saat önizlemesi gösterilir; ifade anlaşılmadığında varsayılan bugün 18:00 kullanılır. `/` kısayolu görev aramasını açar. Tarih yorumu kullanıcı onayı olmadan görev oluşturmaz ve diğer görevleri taşımaz.
+
 ## Hatırlatmalar
 
 Hatırlatmalar kullanıcı açıkça etkinleştirirse Web Push kullanır. Worker Cron görevi zamanında başlar ve görev tamamlanana, ertelenene ya da arşivlenene kadar beş dakikalık aralıklarla yeniden dener. Desteklenen bildirimlerde “Tamamlandı”, “10 dk ertele” ve “Kapat” aksiyonları tek kullanımlık imzalı görev yetkisiyle işlenir; bildirime dokunmak görevi uygulamada açar. Sessiz saatler `Europe/Istanbul` saat diliminde uygulanır; kilit ekranı gizliliği ve metin seçimi Ayarlar'dan yönetilir. Ayarlar'daki test düğmesi gerçek bir push gönderim denemesi yapar. Push teslimatı tarayıcı/işletim sistemi tarafından geciktirilebilir veya engellenebilir; kesin teslimat garantisi yoktur. Push kurulumu için Worker/VAPID sırlarının yapılandırılması ve `worker/README.md` içindeki D1 migration'larının onaylı uygulanması gerekir.
