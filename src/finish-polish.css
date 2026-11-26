@@ -1,0 +1,9 @@
+/* Final interaction and small-screen refinements */
+:root{--surface:#fff;--surface-soft:#faf8fd;--text-muted:#817790}
+button:disabled{cursor:not-allowed;opacity:.55;transform:none!important;filter:none!important}
+input,select,textarea{accent-color:#7656c5}
+[aria-pressed="true"]{color:#5f46a4}
+.inbox-task:focus-within,.timeline-task:focus-within,.agenda-event:focus-within{outline:2px solid #b9a4ec;outline-offset:2px}
+.day-review-modal,.suggestion-modal,.search-modal,.settings-modal{max-height:min(88dvh,900px);overflow:auto;overscroll-behavior:contain}
+@media(max-width:650px){.modal-backdrop{align-items:end;padding:0}.task-modal{width:100%;max-height:92dvh;border-radius:22px 22px 0 0;padding:22px 18px calc(20px + env(safe-area-inset-bottom));overflow:auto}.toast{max-width:calc(100vw - 28px);white-space:normal;line-height:1.45}.inbox-task{min-height:64px}.welcome-row{flex-wrap:wrap}.welcome-row>div{min-width:0}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
