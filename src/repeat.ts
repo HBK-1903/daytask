@@ -27,3 +27,10 @@ export function getNextOccurrenceDate(taskDate: string, rule: Exclude<RepeatRule
   while (next <= completionDay && guard < 1000) { advance(); guard += 1 }
   return localDateKey(next)
 }
+
+export function shiftDateByDays(dateKey: string, days: number): string {
+  const [year, month, day] = dateKey.split('-').map(Number)
+  const date = new Date(year, month - 1, day, 12)
+  date.setDate(date.getDate() + days)
+  return localDateKey(date)
+}

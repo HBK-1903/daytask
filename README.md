@@ -68,10 +68,4 @@ Görevler, alışkanlıklar, öğrenme kayıtları, özel kategoriler ve odak ve
 
 Hızlı eklemede tarih veya saat belirtmezsen görev varsayılan olarak bugüne saat 18:00'e planlanmaz; tarih ve saat atanmadan Gelen Kutusu'na kaydedilir. Gelen Kutusu'ndan görevi açıp planlamak, tamamlamak veya olduğu gibi bırakmak senin kontrolündedir. Yedekleme biçimi görevlerin `inbox` durumunu korur.
 
-Görev odak süresi, mevcut odak oturumlarında görev adıyla izlenir ve öğrenme kartlarında görev bazında gösterilir. Takvimdeki görev saati çalışma planıdır; zorunlu teslim tarihi olarak yorumlanmaz.
-
-## Gelen Kutusu, son tarihler ve zaman kaydı
-
-Hızlı eklemede tarih veya saat belirtmezsen görev varsayılan olarak bugüne saat 18:00'e planlanmaz; tarih ve saat atanmadan Gelen Kutusu'na kaydedilir. Gelen Kutusu'ndan görevi açıp planlamak, tamamlamak veya olduğu gibi bırakmak senin kontrolündedir. Yedekleme biçimi görevlerin `inbox` durumunu korur.
-
-Görev odak süresi, mevcut odak oturumlarında görev adıyla izlenir ve öğrenme kartlarında görev bazında gösterilir. Takvimdeki görev saati çalışma planıdır; zorunlu teslim tarihi olarak yorumlanmaz.
+Görev odak süresi, mevcut odak oturumlarında görev adıyla izlenir ve öğrenme kartlarında görev bazında gösterilir. Takvimdeki görev saati çalışma planıdır; zorunlu teslim tarihi olarak yorumlanmaz. İsteğe bağlı **son tarih**, planlanan çalışma gününden ayrı tutulur ve görev kartlarında görünür. Tekrarlanan görevlerde son tarih ile çalışma günü arasındaki gün farkı yeni tekrara taşınır.

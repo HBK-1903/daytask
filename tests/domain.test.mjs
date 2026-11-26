@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { getElapsedSeconds, getHabitCalendarState, getHabitWeekMetrics, isHabitScheduledOnWeekday, getReminderSyncFailure, getSnoozeDate, isTaskCountableForAnalytics } from '../.test-dist/domain.js'
 import { parseQuickTaskInput } from '../.test-dist/quickAdd.js'
 import { getSessionExpiryMs, isSessionExpiredLocally } from '../.test-dist/session.js'
-import { getNextOccurrenceDate } from '../.test-dist/repeat.js'
+import { getNextOccurrenceDate, shiftDateByDays } from '../.test-dist/repeat.js'
 
 test('habit calendar separates completed, planned-missed, today, upcoming, and off-schedule dates', () => {
   assert.equal(getHabitCalendarState('2026-10-26', '2026-10-30', true, 'selectedDays', [1, 3, 5]), 'completed')
@@ -42,6 +42,11 @@ test('monthly recurrence preserves its original day and clamps short months safe
   const completed = new Date(2026, 0, 31, 10).getTime()
   assert.equal(getNextOccurrenceDate('2026-01-31', 'monthly', completed, 31), '2026-02-28')
   assert.equal(getNextOccurrenceDate('2026-02-28', 'monthly', completed, 31), '2026-03-31')
+})
+
+test('deadline offset shifts with a recurring schedule across month and year boundaries', () => {
+  assert.equal(shiftDateByDays('2026-12-29', 3), '2027-01-01')
+  assert.equal(shiftDateByDays('2026-02-28', -2), '2026-02-26')
 })
 
 test('local session expiry check handles valid, expired, and malformed JWT payloads', () => {

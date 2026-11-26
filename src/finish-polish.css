@@ -6,3 +6,7 @@ input,select,textarea{accent-color:#7656c5}
 .day-review-modal,.suggestion-modal,.search-modal,.settings-modal{max-height:min(88dvh,900px);overflow:auto;overscroll-behavior:contain}
 @media(max-width:650px){.modal-backdrop{align-items:end;padding:0}.task-modal{width:100%;max-height:92dvh;border-radius:22px 22px 0 0;padding:22px 18px calc(20px + env(safe-area-inset-bottom));overflow:auto}.toast{max-width:calc(100vw - 28px);white-space:normal;line-height:1.45}.inbox-task{min-height:64px}.welcome-row{flex-wrap:wrap}.welcome-row>div{min-width:0}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+.deadline-field{padding:14px 15px;border:1px solid #eee8f4;border-radius:12px;background:#fcfbfe}
+.deadline-field>label{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.deadline-field>label span,.deadline-field>small{color:#988ea8;font-size:10px;font-weight:400}
+.deadline-field input{margin:8px 0 3px!important}
