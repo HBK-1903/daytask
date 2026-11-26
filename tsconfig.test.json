@@ -9,5 +9,5 @@
     "outDir": ".test-dist",
     "noEmitOnError": true
   },
-  "include": ["src/domain.ts", "src/quickAdd.ts"]
+  "include": ["src/domain.ts", "src/quickAdd.ts", "src/session.ts", "src/repeat.ts"]
 }

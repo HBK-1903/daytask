@@ -32,6 +32,10 @@ Web uygulaması manifestinde desteklenen platformlar için **Görev ekle**, **Ta
 
 Uygulamanın **Ayarlar → Kestirmeler** bölümündeki düğmeler tam adresi panoya kopyalar. iOS PWA'ları web uygulamasından yerel ana ekran widget'ı sağlayamaz; widget için yerel iOS uygulaması gerekir.
 
+## Açılış ve hesap oturumu
+
+İlk açılışta kayıt/giriş ekranı gösterilir; hesap oturumu olmadan ana çalışma alanı açılmaz. Giriş bilgileri cihazda tekrar sorulmaz. Oturum 25. günde yenilenmeye hazırlanır ve 35 günlük süresi içinde uygulama kullanılırken yeni token alınır; 35 gün boyunca bağlantı kurulamazsa yeniden giriş gerekir. Bu cihazdaki yerel planlar, oturum kapatılırken silinmez. Ağ yoksa geçerli yerel oturumla çevrimdışı kullanım sürer; Worker'a bağlı işlemler bağlantı gerektirir.
+
 ## Şifreli, isteğe bağlı eşitleme
 
 **Ayarlar → Şifreli bulut eşitleme** bölümünde tek kişisel hesap oluşturulup e-posta ve hesap parolasıyla giriş yapılabilir. E-posta yalnızca giriş adıdır; doğrulama e-postası gönderilmez. İlk hesap için Worker'daki `APP_PASSWORD` kurulum anahtarı gerekir. Hesap kurtarma kodu bir kez gösterilir; parola sıfırlanınca yenilenir. Kodu çevrimdışı, güvenli bir yerde sakla; kodu kaybedersen hesap parolasını sıfırlamak mümkün olmaz. Planları buluta gönderme ve başka cihazdan geri yükleme ayrı düğmelerle ve onayla yapılır; otomatik/arka plan eşitlemesi yoktur. Yedek tarayıcıda PBKDF2-SHA-256 (310.000 tur) ve AES-GCM-256 ile şifrelenir. Eşitleme parolası sunucuya gönderilmez veya uygulamada saklanmaz. Worker yalnızca şifreli metni ve IV/salt bilgisini tutar. Her yeni gönderme mevcut bulut kopyasının yerini alır; iki cihazın değişikliklerini birleştirmez.
@@ -41,6 +45,12 @@ Worker API, D1 ve gerekli gizli değerler yapılandırılıp dağıtılmadıkça
 ## Gün planı görünümü
 
 Ana ekrandaki zaman akışı artık tüm bugünkü görevleri genişletebilir ve **Tümü / Açık / Tamamlanan** görünümleri arasında geçiş yapar. Her satırdan görevi tamamlayabilir, yeniden açabilir veya düzenleyebilirsin. İlk tamamlanmamış görevin saati geçtiyse bu plan otomatik değiştirilmez; görev günlük gözden geçirmede kalır. 6,1 inç telefon ekranında metin ve dokunma hedefleri daha rahat okunacak/erişilecek ölçülere çıkarılır; küçük ekranlar için daraltılmış düzen de korunur.
+
+## Görevler, projeler ve gün değerlendirmesi
+
+Göreve isteğe bağlı bir proje adı, en çok 40 kontrol adımı ve günlük/haftalık/aylık tekrar kuralı eklenebilir. Proje adları yeni görevlerde tamamlanırken önerilir; görevler aramada proje adına göre bulunur. Tekrarlı görev için sonraki kopya yalnızca mevcut görev tamamlandığında oluşturulur. Tarihi geçmiş tekrarlar geriye dönük yığılmaz; sıradaki gelecek tarih hesaplanır. Kontrol adımları yeni kopyada yeniden işaretlenmemiş olur. Hiçbir açık görev otomatik olarak başka güne taşınmaz.
+
+**Günü gözden geçir** özeti tamamlananları, kalanları ve kaydedilmiş odak süresini gösterir. Açık görevi tamamlayabilir, düzenleyebilir veya yarına taşıma önerisi verebilirsin; taşıma mevcut onay ekranı olmadan gerçekleşmez.
 
 ## Hızlı görev yakalama
 
@@ -53,3 +63,15 @@ Hatırlatmalar kullanıcı açıkça etkinleştirirse Web Push kullanır. Worker
 ## Yerel veri
 
 Görevler, alışkanlıklar, öğrenme kayıtları, özel kategoriler ve odak verileri varsayılan olarak bu cihazda saklanır. Analiz verileri ölçülmüş oturumlardan hesaplanır; görev süresi gerçekleşen süre gibi gösterilmez.
+
+## Agent skill'leri ve otomatik kalite kapısı
+
+`AGENTS.md` proje kurallarını; `.agents/skills/` ise genel kalite, frontend incelemesi ve regresyon testi iş akışlarını tanımlar. `npm run agent:quality` skill metaverisini ve kritik ürün/tema kurallarını denetler; build, uygulama testleri, Worker typecheck ve Worker testlerini çalıştırır. GitHub Actions bu kapıyı her pull request ve ilgili branch push'unda çalıştırır. Bu otomasyon statik kontroller ve testlerdir; ayrı bir üretken yapay zekâ ajanı başlatmaz ve görsel tarayıcı incelemesinin yerini tutmaz.
+
+Aktif tema `src/theme.css` içinde tanımlı **Warm Sage**: sıcak kâğıt zemin, orman-sage odak/eylem rengi ve kontrollü doğal vurgu. `DESIGN.md` tema kaynağı olarak güncellendi.
+
+## Gelen Kutusu, son tarihler ve zaman kaydı
+
+Hızlı eklemede tarih veya saat belirtmezsen görev varsayılan olarak bugüne saat 18:00'e planlanmaz; tarih ve saat atanmadan Gelen Kutusu'na kaydedilir. Gelen Kutusu'ndan görevi açıp planlamak, tamamlamak veya olduğu gibi bırakmak senin kontrolündedir. Yedekleme biçimi görevlerin `inbox` durumunu korur.
+
+Görev odak süresi, mevcut odak oturumlarında görev adıyla izlenir ve öğrenme kartlarında görev bazında gösterilir. Takvimdeki görev saati çalışma planıdır; zorunlu teslim tarihi olarak yorumlanmaz. İsteğe bağlı **son tarih**, planlanan çalışma gününden ayrı tutulur ve görev kartlarında görünür. Tekrarlanan görevlerde son tarih ile çalışma günü arasındaki gün farkı yeni tekrara taşınır.

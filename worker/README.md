@@ -42,13 +42,14 @@ npm install
 npx wrangler deploy
 ```
 
-The API will be available at the Worker's `workers.dev` URL. Keep `APP_API_ORIGIN` in `wrangler.jsonc` set to that exact HTTPS origin: it is embedded in notification-action payloads so one-tap capabilities are never sent to a host supplied by a task-sync request. A Cron Trigger is configured to run every minute and dispatch due reminders. Workers Builds can deploy this folder from the same GitHub repository: connect `HBK-1903/daytask`, set **Root directory** to `/worker`, leave **Build command** empty, use **Deploy command** `npx wrangler deploy`, and keep `main` as the production branch. Enable preview builds only after pushing a branch with the Worker configuration.
+The API will be available at the Worker's `workers.dev` URL. Keep `APP_API_ORIGIN` in `wrangler.jsonc` set to that exact HTTPS origin: it is embedded in notification-action payloads so one-tap capabilities are never sent to a host supplied by a task-sync request. A Cron Trigger is configured to run every minute and dispatch due reminders. Workers Builds can deploy this folder from the same GitHub repository: connect `HBK-1903/daytask`, set **Root directory** to `/worker`, leave **Build command** empty, use **Deploy command** `npx wrangler deploy`, and keep `main` as the production branch. Enable preview builds only after pushing a branch with the Worker configuration. The root directory is essential: this repository also has a Vite frontend at `/`; if Workers Builds runs Wrangler from `/`, it auto-detects the frontend and fails on its Vite version instead of using `worker/wrangler.jsonc`. These settings live in the Cloudflare dashboard, not in repository files. The quality workflow now runs `wrangler deploy --dry-run` from `worker/` to validate the Worker bundle and bindings locally.
 
 ## API
 
 - `GET /api/health` — health check
-- `POST /api/auth/register` — one-time personal account setup with email, account password, and `APP_PASSWORD` setup key; returns a seven-day session and a one-time recovery code
-- `POST /api/auth/login` — sign in with email and account password
+- `POST /api/auth/register` — one-time personal account setup with email, account password, and `APP_PASSWORD` setup key; returns a 35-day session and a one-time recovery code
+- `POST /api/auth/login` — sign in with email and account password (35-day session)
+- `POST /api/auth/refresh` — validate the current session and issue a new signed token after 25 days; it is checked during app use, with reauthentication required after 35 days without a successful renewal. Previously issued JWTs remain valid until their original expiry or account-wide revocation.
 - `POST /api/auth/recover` — reset the account password with the offline recovery code; rotates the code and revokes old sessions
 - `POST /api/auth/session` — legacy `APP_PASSWORD` session exchange before an account is created; disabled after account setup
 - `GET /api/push/public-key` — public VAPID key for browser subscription

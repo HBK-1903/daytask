@@ -1,0 +1,38 @@
+/* Daytask's calm, warm-paper + sage theme. Keep status colors distinct from the primary brand. */
+:root{
+  color-scheme:light;
+  --ink:#263a33;--muted:#727f78;--purple:#397466;--purple-dark:#285c50;
+  --lavender:#e8f0e9;--line:#e5e7df;--mint:#dceee4;--peach:#f5e6d8;--blue:#e1edf0;
+}
+body{color:#263a33;background:radial-gradient(ellipse at 12% 4%,#fff 0,rgba(255,255,255,.62) 23%,transparent 50%),#f5f3ec}
+.app-shell{color:#263a33}
+.sidebar{background:rgba(255,255,250,.74);border-color:#e5e4da}
+.brand-mark{background:linear-gradient(145deg,#79aa91,#397466);box-shadow:0 7px 16px #39746630}
+.brand-lockup strong{color:#314b40}.brand-lockup strong span{color:#648b75}
+.profile-switch,.icon-button,.date-chip{border-color:#e3e5dc;background:rgba(255,255,250,.8);color:#66766d}
+.nav-item{color:#66766d}.nav-item:hover,.area-list button:hover{background:#eaf0e8;color:#315f51}
+.nav-item.active{color:#285c50;background:linear-gradient(95deg,#e4eee5,#f2f5ed);box-shadow:inset 3px 0 #548a72}
+.nav-dot{background:#548a72}
+.areas-label,.nav-label,.eyebrow,.section-kicker{color:#76887c}
+.eyebrow-line{background:#789a80}.eyebrow-spark{color:#bf8a64}
+.welcome-row h1,.welcome-row h1 em{color:#2a4137}.welcome-row h1 em{color:#4b806d}
+.add-task-button{background:linear-gradient(135deg,#4e8975,#326c5c);box-shadow:0 7px 16px #3974662b}
+.focus-panel{background:linear-gradient(123deg,#285b50 0%,#347665 53%,#4e8a73 100%);box-shadow:0 13px 30px #285b5029}
+.focus-panel:after{background:#d7ead326}.focus-panel-glow{background:#b4d9c324}
+.start-button{color:#285f52}.live-label{color:#e3f1e7}.pulse-dot{background:#e6c097;box-shadow:0 0 0 4px #e6c09726}
+.timeline-task{background:#edf3ea;border-color:#79a58a}.task-state{color:#477763}
+.progress-ring .ring-fill{stroke:#548a72}.stat-dot.dot-violet{background:#548a72}
+.habit-check.checked{background:#4e8975;border-color:#4e8975}
+.week-day.selected,.month-day.selected{background:#397466;border-color:#397466;box-shadow:0 7px 15px #39746632}
+.calendar-mode button.selected{color:#2d6959}.month-day-count{background:#4b806d}
+.category-choice.selected,.detail-choice.selected,.duration-choice-grid button.selected{border-color:#5f967f;background:#edf4ed;color:#285f52}
+.selected-category-note,.plan-preview{background:#f0f4ec;border-color:#e0e8dc}
+.course-purple{background:linear-gradient(145deg,#edf3eb,#fffefa);border-color:#e1e9df}
+.course-icon{background:#e4eee4;color:#477763}.course-tag{color:#65836f}
+.progress-card,.habit-card,.schedule-section,.day-agenda,.side-note,.glass-note,.stat-tile,.insight-tile,.chart-card,.category-card,.trend-card,.category-time-card,.habits-main-card,.consistency-card,.study-log{border-color:#e5e6dd;background:rgba(255,255,250,.86)}
+.secondary-page .calendar-toolbar,.calendar-mode{color:#617268}
+.selection-ready,.priority-chip.priority-high{color:#9c6045}
+.task-modal{border-color:#e5e6dd;background:#fffefa}.task-modal input,.task-modal select,.task-modal textarea{border-color:#e2e5dc;background:#fffefa;color:#31483c}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline-color:#6f9d82}
+.toast{background:#294c41}
+@media(max-width:650px){body{background:radial-gradient(ellipse at 10% 4%,#fff 0,rgba(255,255,255,.48) 25%,transparent 55%),#f5f3ec}}

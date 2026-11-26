@@ -83,3 +83,13 @@ Reference: [product-behavioral-nudge-engine.md](https://github.com/msitarzewski/
 ## Working agreement
 
 Before a substantial change, state which user problem it solves and how it will be verified. Keep product decisions consistent with the context above; if a decision is unclear, ask rather than silently changing the agreed behavior. Prefer small, testable changes and report platform/browser limitations honestly.
+
+## Daytask quality workflow
+
+- Read the relevant implementation, tests, docs, and working-tree state before changing code. Stay on the current branch.
+- Make the smallest coherent user-visible change. For behavior changes, add focused regression tests and cover important boundaries.
+- Preserve local task data, Turkish UI, mobile usability, and user control: no automatic task moves or sync. Keep planned work time distinct from optional deadlines; date-free tasks remain in the inbox.
+- For recurring tasks, verify month/year boundaries and ensure missed occurrences are not backfilled.
+- For UI changes, retain the established design language, use accessible labels/focus states and touch-friendly targets, respect reduced motion, and verify narrow/wide layouts when browser tooling is available. State limitations honestly.
+- Before completion, inspect the diff for data/backup compatibility, dead controls, misleading copy, duplicate styles, and unrelated churn. Run `npm run build`, `npm test`, Worker typecheck/tests, and `git diff --check` when relevant; report only checks actually run.
+- Do not deploy, run remote migrations, change secrets or auth policy, or force-push without explicit authorization.

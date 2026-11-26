@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { constantTimeEqual, generateRecoveryCode, hashCredential, incrementRateLimit, isValidNewPassword, signCapabilityToken, normalizeEmail, normalizeRecoveryCode } from '../src/auth.ts'
+import { ACCOUNT_SESSION_LIFETIME_MS, ACCOUNT_SESSION_RENEWAL_MS, constantTimeEqual, generateRecoveryCode, hashCredential, incrementRateLimit, isSessionRenewalDue, isValidNewPassword, signCapabilityToken, normalizeEmail, normalizeRecoveryCode } from '../src/auth.ts'
 
 test('email normalization trims spaces and uses a stable case-insensitive identifier', () => {
   assert.equal(normalizeEmail('  Sample.User@Example.com '), 'sample.user@example.com')
@@ -31,6 +31,16 @@ test('password and recovery credential hashes use per-credential salts', async (
   assert.equal(constantTimeEqual(first.hash, retry.hash), true)
   assert.equal(constantTimeEqual(first.hash, wrong.hash), false)
   assert.equal(constantTimeEqual(first.hash, `${first.hash}x`), false)
+})
+
+test('account sessions last 35 days and become eligible for renewal after 25 days', () => {
+  const issuedAt = 1_800_000_000
+  const issuedAtMs = issuedAt * 1000
+  assert.equal(ACCOUNT_SESSION_LIFETIME_MS, 35 * 24 * 60 * 60_000)
+  assert.equal(ACCOUNT_SESSION_RENEWAL_MS, 25 * 24 * 60 * 60_000)
+  assert.equal(isSessionRenewalDue(issuedAt, issuedAtMs + ACCOUNT_SESSION_RENEWAL_MS - 1), false)
+  assert.equal(isSessionRenewalDue(issuedAt, issuedAtMs + ACCOUNT_SESSION_RENEWAL_MS), true)
+  assert.equal(isSessionRenewalDue(undefined, issuedAtMs), true)
 })
 
 test('reminder action tokens are keyed capabilities bound to a specific task and nonce', async () => {

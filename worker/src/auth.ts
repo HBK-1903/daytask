@@ -1,5 +1,12 @@
 const encoder = new TextEncoder()
 const PASSWORD_ITERATIONS = 210_000
+export const ACCOUNT_SESSION_LIFETIME_MS = 35 * 24 * 60 * 60_000
+export const ACCOUNT_SESSION_RENEWAL_MS = 25 * 24 * 60 * 60_000
+
+export function isSessionRenewalDue(issuedAtSeconds: number | undefined, nowMs = Date.now()): boolean {
+  if (typeof issuedAtSeconds !== 'number' || !Number.isFinite(issuedAtSeconds)) return true
+  return nowMs - issuedAtSeconds * 1000 >= ACCOUNT_SESSION_RENEWAL_MS
+}
 
 function toBase64Url(bytes: Uint8Array): string {
   let binary = ''

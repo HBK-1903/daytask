@@ -1,0 +1,36 @@
+name: Daytask quality and skill checks
+
+on:
+  pull_request:
+  push:
+    branches: [main, 'arena/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: daytask-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Skill guardrails, build, and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Install Worker dependencies
+        run: npm ci --prefix worker
+      - name: Validate skills and run quality suite
+        run: npm run agent:quality
+      - name: Check complete pull request diff
+        if: github.event_name == 'pull_request'
+        run: git diff --check "origin/${GITHUB_BASE_REF}...HEAD"
