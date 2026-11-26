@@ -30,15 +30,16 @@ const commands = [
   ['npm', ['test']],
   ['npm', ['--prefix', 'worker', 'run', 'typecheck']],
   ['npm', ['--prefix', 'worker', 'run', 'test']],
+  ['npx', ['wrangler', 'deploy', '--dry-run'], 'worker'],
   ['git', ['diff', '--check']],
 ]
-for (const [command, args] of commands) {
+for (const [command, args, cwd] of commands) {
   console.log(`\n> ${command} ${args.join(' ')}`)
   const result = await new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: 'inherit', shell: process.platform === 'win32' })
+    const child = spawn(command, args, { cwd, stdio: 'inherit', shell: process.platform === 'win32' })
     child.on('error', reject)
     child.on('close', (code) => resolve(code ?? 1))
   })
   if (result !== 0) process.exit(result)
 }
-console.log('\nDaytask quality checks passed. Browser visual review is not part of this CI job.')
+console.log('\nDaytask quality checks passed, including a Worker bundle dry-run. Browser visual review is not part of this CI job.')
