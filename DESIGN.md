@@ -8,31 +8,30 @@ This is the product-specific visual source of truth for Violet Focus. It uses a 
 
 ## 2. Visual theme and atmosphere
 
-The current visual refresh is **Aurora Glass**: Violet Focus's own lavender-first, layered glass treatment. `src/polish.css` applies the current refinement layer over the base styles; keep it aligned with these tokens and the phone-first rules below.
+The active visual refresh is **Warm Sage**: a calm, warm-paper canvas with forest-sage actions and restrained terracotta for warmth. `src/theme.css` is the final theme layer over the legacy base styles. The product name stays Violet Focus; the interface palette is intentionally refreshed without rebranding.
 
-- Light-first, lavender-tinted canvas with subtle ambient color—not a flat white productivity template.
-- Frosted-glass treatment is a surface accent for navigation and selected cards, never a reason to lower text contrast.
-- Violet identifies focus, primary actions, and the selected navigation state.
-- Mint, peach, and blue are restrained semantic accents for success/health, creative/personal, and secondary information. Keep category accents within the violet family unless a status needs clearer meaning.
-- Avoid dense decoration, large gradients behind body text, excessive blur, or motion that competes with the active task.
+- Light-first warm ivory canvas, sage/forest focus panel, and subdued natural green selected states.
+- Surfaces remain softly translucent, but readability and task contrast take priority over glass effects.
+- Sage identifies primary actions, focus, and selected navigation; terracotta is only a secondary accent, never the success color.
+- Keep semantic success, warning, and learning colors distinct from the primary brand color.
+- Avoid dense decoration, gradients behind body text, excessive blur, or motion that competes with the active task.
 
 ## 3. Color tokens
 
 | Token | Value | Role |
 |---|---|---|
-| `--canvas` | `#f4efff` | Main lavender page canvas |
-| `--surface` | `rgba(255,255,255,.72)` | Cards and raised panels |
-| `--surface-glass` | `rgba(255,255,255,.56)` | Sidebar / translucent chrome |
-| `--ink` | `#33284e` | Main text |
-| `--ink-soft` | `#55476f` | Secondary headings and labels |
-| `--muted` | `#9389a8` | Secondary text; never use for essential small text without contrast checking |
-| `--violet` | `#7551d5` | Primary action and focus accent |
-| `--violet-dark` | `#5739b6` | High-emphasis violet interaction |
-| `--lavender` | `#eee6ff` | Selected, informational, and soft-card background |
-| `--line` | `#eee9f6` | Delicate borders and separators |
-| `--mint` | `#d7f2e7` | Positive / health accent |
-| `--peach` | `#ffe8d9` | Creative / warm accent |
-| `--blue` | `#dfeaff` | Secondary / learning accent |
+| `--canvas` | `#f5f3ec` | Warm paper page canvas |
+| `--surface` | `rgba(255,255,250,.86)` | Cards and raised panels |
+| `--surface-glass` | `rgba(255,255,250,.74)` | Sidebar / translucent chrome |
+| `--ink` | `#263a33` | Main text |
+| `--muted` | `#727f78` | Secondary text; check contrast for small labels |
+| `--purple` (legacy token name) | `#397466` | Sage primary action and focus accent |
+| `--purple-dark` (legacy token name) | `#285c50` | High-emphasis forest interaction |
+| `--lavender` (legacy token name) | `#e8f0e9` | Sage selected and soft-card background |
+| `--line` | `#e5e7df` | Delicate borders and separators |
+| `--mint` | `#dceee4` | Positive / health accent |
+| `--peach` | `#f5e6d8` | Warm secondary accent |
+| `--blue` | `#e1edf0` | Secondary / learning accent |
 
 Check actual foreground/background combinations for WCAG AA. Do not assume translucent surfaces preserve contrast over every backdrop.
 
@@ -51,10 +50,10 @@ Check actual foreground/background combinations for WCAG AA. Do not assume trans
 - Main workspace uses a clear hierarchy: current action first, schedule second, progress/supporting context alongside it.
 - Use a consistent spacing rhythm based on 4px increments; keep related controls grouped.
 
-### Phone, especially iPhone SE (2nd generation)
+### Phone, especially iPhone 13
 
-- Treat a 375px-wide viewport as a first-class layout, not a squeezed desktop page.
-- Replace the sidebar as primary navigation with a fixed five-item bottom bar: **Şimdi, Takvim, Rutinler, Öğrenme, Analiz**.
+- Treat a 390px-wide viewport as a first-class layout, not a squeezed desktop page.
+- Replace the sidebar as primary navigation with a fixed bottom bar; keep **Gelen Kutusu, Şimdi, Takvim, Rutinler, Öğrenme, Analiz** reachable without overflow.
 - Add safe-area padding using `env(safe-area-inset-*)`; content must remain scrollable above the bottom navigation and home indicator.
 - Show one main task at a time; stack secondary panels vertically and avoid multi-column dashboards at narrow widths.
 - Maintain touch targets of at least 44px where practical. Keep forms legible and prevent iOS input zoom by using 16px or larger input text.
@@ -62,7 +61,7 @@ Check actual foreground/background combinations for WCAG AA. Do not assume trans
 
 ## 6. Components and interaction states
 
-- **Primary action:** solid violet fill, high contrast, one clear verb.
+- **Primary action:** solid sage/forest fill, high contrast, one clear verb.
 - **Secondary action:** translucent/outlined treatment; never make completion or snooze hard to find.
 - **Current task card:** strongest visual hierarchy on the home screen. Show task, time, duration, and actions without requiring a scroll on common phone sizes.
 - **Cards:** soft 13–19px radius, light border, restrained shadow; glass blur only where it improves grouping.

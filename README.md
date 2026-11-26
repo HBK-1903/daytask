@@ -64,6 +64,12 @@ Hatırlatmalar kullanıcı açıkça etkinleştirirse Web Push kullanır. Worker
 
 Görevler, alışkanlıklar, öğrenme kayıtları, özel kategoriler ve odak verileri varsayılan olarak bu cihazda saklanır. Analiz verileri ölçülmüş oturumlardan hesaplanır; görev süresi gerçekleşen süre gibi gösterilmez.
 
+## Agent skill'leri ve otomatik kalite kapısı
+
+`AGENTS.md` proje kurallarını; `.agents/skills/` ise genel kalite, frontend incelemesi ve regresyon testi iş akışlarını tanımlar. `npm run agent:quality` skill metaverisini ve kritik ürün/tema kurallarını denetler; build, uygulama testleri, Worker typecheck ve Worker testlerini çalıştırır. GitHub Actions bu kapıyı her pull request ve ilgili branch push'unda çalıştırır. Bu otomasyon statik kontroller ve testlerdir; ayrı bir üretken yapay zekâ ajanı başlatmaz ve görsel tarayıcı incelemesinin yerini tutmaz.
+
+Aktif tema `src/theme.css` içinde tanımlı **Warm Sage**: sıcak kâğıt zemin, orman-sage odak/eylem rengi ve kontrollü doğal vurgu. `DESIGN.md` tema kaynağı olarak güncellendi.
+
 ## Gelen Kutusu, son tarihler ve zaman kaydı
 
 Hızlı eklemede tarih veya saat belirtmezsen görev varsayılan olarak bugüne saat 18:00'e planlanmaz; tarih ve saat atanmadan Gelen Kutusu'na kaydedilir. Gelen Kutusu'ndan görevi açıp planlamak, tamamlamak veya olduğu gibi bırakmak senin kontrolündedir. Yedekleme biçimi görevlerin `inbox` durumunu korur.
