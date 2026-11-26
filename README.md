@@ -63,3 +63,15 @@ Hatırlatmalar kullanıcı açıkça etkinleştirirse Web Push kullanır. Worker
 ## Yerel veri
 
 Görevler, alışkanlıklar, öğrenme kayıtları, özel kategoriler ve odak verileri varsayılan olarak bu cihazda saklanır. Analiz verileri ölçülmüş oturumlardan hesaplanır; görev süresi gerçekleşen süre gibi gösterilmez.
+
+## Gelen Kutusu, son tarihler ve zaman kaydı
+
+Hızlı eklemede tarih veya saat belirtmezsen görev varsayılan olarak bugüne saat 18:00'e planlanmaz; tarih ve saat atanmadan Gelen Kutusu'na kaydedilir. Gelen Kutusu'ndan görevi açıp planlamak, tamamlamak veya olduğu gibi bırakmak senin kontrolündedir. Yedekleme biçimi görevlerin `inbox` durumunu korur.
+
+Görev odak süresi, mevcut odak oturumlarında görev adıyla izlenir ve öğrenme kartlarında görev bazında gösterilir. Takvimdeki görev saati çalışma planıdır; zorunlu teslim tarihi olarak yorumlanmaz.
+
+## Gelen Kutusu, son tarihler ve zaman kaydı
+
+Hızlı eklemede tarih veya saat belirtmezsen görev varsayılan olarak bugüne saat 18:00'e planlanmaz; tarih ve saat atanmadan Gelen Kutusu'na kaydedilir. Gelen Kutusu'ndan görevi açıp planlamak, tamamlamak veya olduğu gibi bırakmak senin kontrolündedir. Yedekleme biçimi görevlerin `inbox` durumunu korur.
+
+Görev odak süresi, mevcut odak oturumlarında görev adıyla izlenir ve öğrenme kartlarında görev bazında gösterilir. Takvimdeki görev saati çalışma planıdır; zorunlu teslim tarihi olarak yorumlanmaz.
