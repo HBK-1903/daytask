@@ -16,8 +16,8 @@ import './day-planner.css'
 import './session-gate.css'
 import './review-repeat-project.css'
 import './inbox.css'
+import './finish-polish.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode><App /></React.StrictMode>,
 )
-import './finish-polish.css'
